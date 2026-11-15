@@ -1,0 +1,359 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../domain/utils/formatters.dart';
+import '../../providers/payout_providers.dart';
+import '../../theme/app_theme.dart';
+import 'backup_view.dart';
+
+/// Settings screen for salary rules and database disaster recovery.
+class SettingsScreen extends ConsumerStatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  final _formKey = GlobalKey<FormState>();
+
+  String _selectedMode = 'percent';
+  late final TextEditingController _percentController;
+  late final TextEditingController _fixedSalaryController;
+  bool _initialized = false;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _percentController = TextEditingController();
+    _fixedSalaryController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _percentController.dispose();
+    _fixedSalaryController.dispose();
+    super.dispose();
+  }
+
+  void _initFields(dynamic setting) {
+    if (_initialized) return;
+    _selectedMode = setting.salaryMode;
+    // Basis points e.g. 3000 -> 30%
+    final percent = setting.salaryPercentBasisPoints ~/ 100;
+    _percentController.text = percent.toString();
+    final fixedPesos = setting.fixedDailySalaryCentavos ~/ 100;
+    _fixedSalaryController.text = fixedPesos.toString();
+    _initialized = true;
+  }
+
+  Future<void> _saveSettings() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isSaving = true);
+    try {
+      int basisPoints = 3000;
+      int fixedDailySalaryCentavos = 0;
+
+      if (_selectedMode == 'percent') {
+        final percentVal = int.parse(_percentController.text.trim());
+        basisPoints = percentVal * 100;
+      } else {
+        final centavos = parsePesoStringToCentavos(
+          _fixedSalaryController.text.trim(),
+        );
+        if (centavos == null || centavos < 0) {
+          throw const FormatException('Invalid fixed salary amount');
+        }
+        fixedDailySalaryCentavos = centavos;
+      }
+
+      await ref
+          .read(payoutRepositoryProvider)
+          .updateSettings(
+            salaryMode: _selectedMode,
+            salaryPercentBasisPoints: basisPoints,
+            fixedDailySalaryCentavos: fixedDailySalaryCentavos,
+          );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Salary settings saved successfully!'),
+            backgroundColor: AppTheme.accentGreen,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save settings: $e'),
+            backgroundColor: AppTheme.dangerColor,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settingsAsync = ref.watch(settingsStreamProvider);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings & Backup')),
+      body: settingsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (err, _) => Center(child: Text('Error loading settings: $err')),
+        data: (setting) {
+          _initFields(setting);
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Salary Configuration Card
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: const BorderSide(
+                      color: AppTheme.borderSubtle,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryColor.withValues(
+                                    alpha: 0.15,
+                                  ),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(
+                                  Icons.account_balance_wallet,
+                                  color: AppTheme.primaryDark,
+                                  size: 24,
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Daily Salary Calculation Mode',
+                                      style: TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppTheme.textPrimary,
+                                      ),
+                                    ),
+                                    SizedBox(height: 2),
+                                    Text(
+                                      'Choose how your daily wage is determined.',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppTheme.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Mode Selector
+                          SegmentedButton<String>(
+                            segments: const [
+                              ButtonSegment<String>(
+                                value: 'percent',
+                                label: Text('% of Net Profit'),
+                                icon: Icon(Icons.percent_rounded),
+                              ),
+                              ButtonSegment<String>(
+                                value: 'fixed',
+                                label: Text('Fixed Daily (₱)'),
+                                icon: Icon(Icons.payments_outlined),
+                              ),
+                            ],
+                            selected: {_selectedMode},
+                            onSelectionChanged: (newSelection) {
+                              setState(() {
+                                _selectedMode = newSelection.first;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 20),
+
+                          if (_selectedMode == 'percent') ...[
+                            TextFormField(
+                              controller: _percentController,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                              ],
+                              decoration: InputDecoration(
+                                labelText: 'Salary Percentage (%)',
+                                suffixText: '%',
+                                helperText: 'Default: 30%. Stored as basis points (3000 bps).\nSalary is capped at net profit.',
+                                helperMaxLines: 2,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              validator: (val) {
+                                if (val == null || val.trim().isEmpty) {
+                                  return 'Enter a percentage';
+                                }
+                                final p = int.tryParse(val.trim());
+                                if (p == null || p < 0 || p > 100) {
+                                  return 'Enter a value between 0 and 100';
+                                }
+                                return null;
+                              },
+                            ),
+                          ] else ...[
+                            TextFormField(
+                              controller: _fixedSalaryController,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: InputDecoration(
+                                labelText: 'Fixed Daily Salary (₱)',
+                                prefixText: '₱ ',
+                                helperText: 'Integer centavos. Capped at daily net profit if profit is lower.',
+                                helperMaxLines: 2,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              validator: (val) {
+                                if (val == null || val.trim().isEmpty) {
+                                  return 'Enter a daily salary amount';
+                                }
+                                final centavos = parsePesoStringToCentavos(
+                                  val.trim(),
+                                );
+                                if (centavos == null || centavos < 0) {
+                                  return 'Enter a valid positive amount';
+                                }
+                                return null;
+                              },
+                            ),
+                          ],
+
+                          const SizedBox(height: 20),
+                          ElevatedButton.icon(
+                            icon: _isSaving
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.save_rounded, size: 20),
+                            label: Text(
+                              _isSaving ? 'Saving...' : 'Save Salary Mode',
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(50),
+                              backgroundColor: AppTheme.primaryDark,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: _isSaving ? null : _saveSettings,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Offline Backup Section
+                const BackupView(),
+
+                const SizedBox(height: 20),
+
+                // App & Spec Info Card
+                Card(
+                  elevation: 0,
+                  color: AppTheme.backgroundLight,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: const BorderSide(
+                      color: AppTheme.borderSubtle,
+                      width: 1,
+                    ),
+                  ),
+                  child: const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.shield_outlined,
+                              size: 18,
+                              color: AppTheme.textSecondary,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              'Banana POS System Security & Contract',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          '• Offline-First: Zero network permissions, no external telemetry.\n'
+                          '• Pure Integer Arithmetic: Zero floating-point rounding drifts.\n'
+                          '• Historical Audit: Archived varieties and sale snapshot immutability.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textSecondary,
+                            height: 1.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
