@@ -188,9 +188,7 @@ class BackupService {
       // 2. Insert Products
       final rawProducts = tables['products'] as List? ?? [];
       for (final p in rawProducts) {
-        await _db
-            .into(_db.products)
-            .insert(
+        await _db.into(_db.products).insert(
               ProductsCompanion.insert(
                 id: Value(p['id'] as int),
                 name: p['name'] as String,
@@ -205,9 +203,7 @@ class BackupService {
       // 3. Insert Settings
       final rawSettings = tables['settings'] as List? ?? [];
       for (final s in rawSettings) {
-        await _db
-            .into(_db.settings)
-            .insert(
+        await _db.into(_db.settings).insert(
               SettingsCompanion.insert(
                 id: Value(s['id'] as int),
                 salaryMode: Value(s['salary_mode'] as String? ?? 'percent'),
@@ -224,9 +220,7 @@ class BackupService {
       // 4. Insert Capital History
       final rawCapital = tables['capital_history'] as List? ?? [];
       for (final c in rawCapital) {
-        await _db
-            .into(_db.capitalHistory)
-            .insert(
+        await _db.into(_db.capitalHistory).insert(
               CapitalHistoryCompanion.insert(
                 id: Value(c['id'] as int),
                 productId: c['product_id'] as int,
@@ -240,9 +234,7 @@ class BackupService {
       // 5. Insert Sales
       final rawSales = tables['sales'] as List? ?? [];
       for (final s in rawSales) {
-        await _db
-            .into(_db.sales)
-            .insert(
+        await _db.into(_db.sales).insert(
               SalesCompanion.insert(
                 id: Value(s['id'] as int),
                 createdAt: DateTime.parse(s['created_at'] as String),
@@ -258,9 +250,7 @@ class BackupService {
       // 6. Insert Sale Items
       final rawItems = tables['sale_items'] as List? ?? [];
       for (final i in rawItems) {
-        await _db
-            .into(_db.saleItems)
-            .insert(
+        await _db.into(_db.saleItems).insert(
               SaleItemsCompanion.insert(
                 id: Value(i['id'] as int),
                 saleId: i['sale_id'] as int,
@@ -276,9 +266,7 @@ class BackupService {
       // 7. Insert Expenses
       final rawExpenses = tables['expenses'] as List? ?? [];
       for (final e in rawExpenses) {
-        await _db
-            .into(_db.expenses)
-            .insert(
+        await _db.into(_db.expenses).insert(
               ExpensesCompanion.insert(
                 id: Value(e['id'] as int),
                 date: DateTime.parse(e['date'] as String),
@@ -287,9 +275,8 @@ class BackupService {
                 note: Value(e['note'] as String?),
                 productId: Value(e['product_id'] as int?),
                 grams: Value(e['grams'] as int?),
-                capitalPerKgCentavos: Value(
-                  e['capital_per_kg_centavos'] as int?,
-                ),
+                capitalPerKgCentavos:
+                    Value(e['capital_per_kg_centavos'] as int?),
               ),
             );
       }
@@ -297,9 +284,7 @@ class BackupService {
       // 8. Insert Restock Purchases
       final rawRestock = tables['restock_purchases'] as List? ?? [];
       for (final r in rawRestock) {
-        await _db
-            .into(_db.restockPurchases)
-            .insert(
+        await _db.into(_db.restockPurchases).insert(
               RestockPurchasesCompanion.insert(
                 id: Value(r['id'] as int),
                 date: DateTime.parse(r['date'] as String),
@@ -312,9 +297,7 @@ class BackupService {
       // 9. Insert Payouts
       final rawPayouts = tables['payouts'] as List? ?? [];
       for (final p in rawPayouts) {
-        await _db
-            .into(_db.payouts)
-            .insert(
+        await _db.into(_db.payouts).insert(
               PayoutsCompanion.insert(
                 id: Value(p['id'] as int),
                 date: DateTime.parse(p['date'] as String),
@@ -332,19 +315,14 @@ class BackupService {
   Future<void> shareBackupFile() async {
     final jsonString = await exportToJsonString();
     final tempDir = await getTemporaryDirectory();
-    final timestamp = DateTime.now()
-        .toIso8601String()
-        .replaceAll(':', '-')
-        .split('.')
-        .first;
+    final timestamp =
+        DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
     final file = File('${tempDir.path}/banana_pos_backup_$timestamp.json');
     await file.writeAsString(jsonString);
 
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [XFile(file.path)],
-        text: 'Banana POS Offline Backup ($timestamp)',
-      ),
+    await SharePlus.shareXFiles(
+      [XFile(file.path)],
+      text: 'Banana POS Offline Backup ($timestamp)',
     );
 
     await recordLastBackupTime();
@@ -352,16 +330,16 @@ class BackupService {
 
   /// Prompts user to select a JSON file and restores database after explicit confirmation.
   Future<bool> pickAndRestoreBackupFile() async {
-    final files = await FilePicker.pickFiles(
+    final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['json'],
     );
 
-    if (files.isEmpty) {
+    if (result == null || result.files.isEmpty) {
       return false;
     }
 
-    final path = files.first.path;
+    final path = result.files.single.path;
     if (path == null) return false;
 
     final file = File(path);
@@ -400,3 +378,4 @@ class BackupService {
     return null;
   }
 }
+
