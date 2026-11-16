@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../domain/utils/formatters.dart';
 import '../../providers/payout_providers.dart';
+import '../../providers/update_providers.dart';
 import '../../theme/app_theme.dart';
 import 'backup_view.dart';
+import 'update_dialog.dart';
 
 /// Settings screen for salary rules and database disaster recovery.
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -23,6 +25,46 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final TextEditingController _fixedSalaryController;
   bool _initialized = false;
   bool _isSaving = false;
+  bool _isCheckingUpdates = false;
+
+  Future<void> _handleManualUpdateCheck() async {
+    setState(() => _isCheckingUpdates = true);
+    try {
+      final update = await ref
+          .read(availableUpdateProvider.notifier)
+          .checkManual();
+      final versionInfo = await ref.read(installedVersionProvider.future);
+      if (!mounted) return;
+
+      if (update != null) {
+        UpdateDialog.show(
+          context,
+          release: update,
+          currentVersion: versionInfo.version,
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("You're up to date! (v${versionInfo.version})"),
+            backgroundColor: AppTheme.accentGreen,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Update check failed: $e'),
+            backgroundColor: AppTheme.dangerColor,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isCheckingUpdates = false);
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -105,6 +147,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final settingsAsync = ref.watch(settingsStreamProvider);
+    final versionAsync = ref.watch(installedVersionProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings & Backup')),
@@ -296,6 +339,107 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
                 // Offline Backup Section
                 const BackupView(),
+
+                const SizedBox(height: 20),
+
+                // Software Updates Card
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: const BorderSide(
+                      color: AppTheme.borderSubtle,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryColor.withValues(
+                                  alpha: 0.15,
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(
+                                Icons.system_update_rounded,
+                                color: AppTheme.primaryDark,
+                                size: 24,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Software Updates',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  versionAsync.when(
+                                    data: (info) => Text(
+                                      info.displayString,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        color: AppTheme.textSecondary,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    loading: () =>
+                                        const Text('Checking version...'),
+                                    error: (err, stack) =>
+                                        const Text('Version 1.0.0+1'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        OutlinedButton.icon(
+                          icon: _isCheckingUpdates
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.refresh_rounded, size: 20),
+                          label: Text(
+                            _isCheckingUpdates
+                                ? 'Checking for updates...'
+                                : 'Check for Updates',
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(50),
+                            side: const BorderSide(
+                              color: AppTheme.borderSubtle,
+                              width: 1.5,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: _isCheckingUpdates
+                              ? null
+                              : _handleManualUpdateCheck,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
 
                 const SizedBox(height: 20),
 

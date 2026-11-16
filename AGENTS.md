@@ -1,61 +1,75 @@
 # AGENTS.md
 
-Banana POS: offline-first Flutter/Android point-of-sale app for selling bananas by the kilo. Single user, no backend, no login, no network calls.
+## 1. Project Summary
+Banana POS: offline-first Flutter/Android point-of-sale app for selling bananas by weight (per kilo) at market stalls. Single user, no backend, no login. The ONLY allowed network activity is checking for and downloading updates from public GitHub Releases.
 
-## Source of truth
+## 2. Source of Truth
+Read `spec.md` first. `spec.md` is the source of truth; update it before changing behavior. If code contradicts it, the code is wrong.
 
-Read in this order; earlier files win:
+## 3. Tech Stack & Architecture
+- Flutter / Dart, Material 3, portrait only.
+- `lib/domain/`: Pure Dart models (`Weight`, `Money`, `AppVersion`, `PricingCalculator`, `PayoutCalculator`). Zero Flutter imports. Fully unit tested.
+- `lib/data/`: Drift SQLite (`app_database.dart`, `tables.dart`), repositories, and services (`backup_service.dart`, `update_service.dart`, `app_installer.dart`).
+- `lib/presentation/`: Screens, widgets, Riverpod providers (`lib/presentation/providers/`).
+- `lib/config/update_config.dart`: Single source of truth for GitHub coordinates (`githubOwner`, `githubRepo`).
 
-1. `spec.md` — product, numeric, and payout contract. If code contradicts it, the code is wrong unless the spec is updated first.
-2. `PLAN.md` — phased build contract. Work only inside the current phase's declared write surface.
-3. `.agents/rules.md` — standing agent rules (TDD, no hard deletes, gate discipline).
+## 4. Hard Invariants
+- Money is integer centavos; weight is integer grams. Zero `double`/`float` for money or weight.
+- One rounding function: `round_half_up(price * grams / 1000)` applied once per line via `PricingCalculator`.
+- One currency formatter: `formatMoney` in `lib/domain/utils/formatters.dart`.
+- Sale items and spoilage snapshot product name, price, and capital at transaction time. Past profit is never recomputed from current capital.
+- Voided sales kept for audit, flagged, and excluded from all totals.
+- Soft-archive products; never hard-delete. Multi-row writes must use transactions.
+- No secrets, tokens, or API keys in the repo or client. Unauthenticated public requests only.
 
-Do not start a phase before the previous one passes the gate.
+## 5. Commands
+- Run: `flutter run`
+- Test: `flutter test`
+- Analyze: `flutter analyze`
+- Format: `dart format .`
+- Gate: `powershell -NoProfile -ExecutionPolicy Bypass -File .\.agents\team\diff-scan.ps1`
+- Build Release: `flutter build apk --release`
 
-## Non-negotiable numeric rules
+## 6. Versioning & Release Workflow
+- Format: `MAJOR.MINOR.PATCH+BUILD` in `pubspec.yaml` (e.g. `1.0.0+1`). `BUILD` is `versionCode` and strictly increases.
+- Trigger phrases: ONLY bump version when instructed: `"update the installer"`, `"release"`, or `"new version"`.
+- Rule: Default to PATCH bump (unless minor or major requested); always `BUILD+1`.
+- Automation: Run `.\scripts\release.ps1` (Windows) or `./scripts/release.sh` (Linux/macOS).
+  - Updates `pubspec.yaml` and `CHANGELOG.md`.
+  - Runs test suite and builds signed release APK (`releases/banana-pos-vX.Y.Z.apk`).
+  - Generates cryptographic checksum (`releases/banana-pos-vX.Y.Z.apk.sha256`).
+  - Outputs exact GitHub release command (`gh release create ...`).
+- Never push, tag, or publish releases automatically.
 
-- Weight is `int` grams. Money is `int` centavos. Never `double`/`float` for either.
-- Line value = `round_half_up(pricePerKgCentavos * grams / 1000)`, integer-only, rounded once per line. Use `PricingCalculator` in `lib/domain/services/pricing_calculator.dart`; do not re-derive this math.
-- Discounts use largest-remainder allocation so line discounts sum exactly to the total.
-- Format centavos with the single formatter in `lib/domain/utils/formatters.dart`. Do not add a second one.
-- No automatic rounding to whole pesos. The user picks round up/down at checkout.
+## 7. Keystore & Signing Setup
+- Release signing is configured in `android/app/build.gradle.kts` via `android/key.properties`.
+- Both `key.properties` and `*.keystore` are strictly in `.gitignore` and must NEVER be committed.
+- Configuration in `android/key.properties`:
+  ```properties
+  storePassword=<SECRET>
+  keyPassword=<SECRET>
+  keyAlias=banana_pos_key
+  storeFile=app/release.keystore
+  ```
+- **CRITICAL WARNING**: The user must back up `release.keystore` and `key.properties` offline. If lost, existing installs cannot be updated and will require an uninstall that deletes local data!
+- Release builds strictly fail if `key.properties` or the keystore file is missing; no debug fallback.
+- `applicationId = "com.banana.pos"` is permanently fixed.
 
-## Layout
+## 8. Current Status Checklist
+- [x] Step 1: Project setup, DB, domain money/weight logic + tests.
+- [x] Step 2: Products screen + capital history.
+- [x] Step 3: POS + cart + receipt.
+- [x] Step 4: Sales history + void/edit.
+- [x] Step 5: Expenses, Daily Summary, Payout, Parents' Balance, Settings.
+- [x] Step 6: Backup/restore.
+- [x] Step 7: Update checker, in-app update install, release workflow, and AGENTS.md.
 
-- `lib/domain/` — pure Dart, no Flutter imports, fully unit tested.
-- `lib/data/` — Drift database (`app_database.dart`, `tables.dart`) and repositories.
-- `lib/presentation/` — screens, widgets, Riverpod providers.
-- `lib/data/database/app_database.g.dart` is generated. Change `tables.dart` or `app_database.dart`, then run `dart run build_runner build --delete-conflicting-outputs`. Never hand-edit it.
+## 9. Manual Test Plan
+1. Build and install version 1.0.0 on the phone.
+2. Bump to 1.0.1 using the release workflow (`.\scripts\release.ps1`) and publish on GitHub with APK and .sha256 assets.
+3. Open 1.0.0 and check that the banner/dialog appears, download is verified, Android prompts to install, and data is still intact after updating.
+4. Confirm "Check for updates" in Settings says "You're up to date!" on 1.0.1.
 
-## Data invariants
-
-- Archive products; never hard-delete. Old sales must stay intact.
-- Sale items snapshot product name, price, and capital. Never recompute past profit from current capital.
-- Capital edits write a `capital_history` row; price-only edits do not.
-- Multi-row writes go in a `transaction`.
-- Product names are unique among active products, case-insensitively.
-
-## Gate (must be green before review)
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\.agents\team\diff-scan.ps1
-```
-
-Linux/macOS twin: `.agents/team/diff-scan.sh`. It runs `dart format --set-exit-if-changed`, `flutter analyze`, `flutter test`, plus allowlist, secret, and destructive-command checks. Exit 0 = GREEN, exit 1 = BLOCK. `-GateOnly` skips lint and tests.
-
-Prefix shell commands with `rtk` per `.agents/rules.md` (e.g. `rtk git status`, `rtk flutter test`).
-
-## Testing
-
-- Tests use in-memory Drift: `AppDatabase(NativeDatabase.memory())`. Close the database in `tearDown`.
-- Domain tests stay pure Dart. Do not import Flutter into `lib/domain/`.
-- If `flutter test` fails to start with a locked `build/native_assets/windows/sqlite3.dll`, kill stale `dart`/`flutter_tester` processes and rerun.
-
-## UI constraints
-
-- Portrait only, English UI, Material 3. Used one-handed at a market stall: large touch targets, high contrast, readable in sunlight.
-- Confirm before any destructive action (archive, void, import, reopen).
-
-## Dependencies
-
-Present: `drift`, `sqlite3_flutter_libs`, `path_provider`, `path`, `flutter_riverpod`, `intl`, `share_plus`, `file_picker`. There is no HTTP client and no network permission in the Android manifest; keep it that way.
+## 10. Decisions Log
+- 2026-11-15: Initial 6-phase offline architecture and spec established.
+- 2026-11-16: Spec amended to allow HTTPS unauthenticated network requests strictly for GitHub Releases update checks and APK downloads.

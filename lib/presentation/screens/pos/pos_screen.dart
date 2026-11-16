@@ -11,7 +11,9 @@ import '../parents/parents_balance_screen.dart';
 import '../products/products_screen.dart';
 import '../sales/sales_history_screen.dart';
 import '../settings/settings_screen.dart';
+import '../settings/update_dialog.dart';
 import '../summary/daily_summary_screen.dart';
+import '../../providers/update_providers.dart';
 import 'cart_sheet.dart';
 import 'weighing_bottom_sheet.dart';
 
@@ -21,13 +23,48 @@ import 'weighing_bottom_sheet.dart';
 /// - Direct sunlight readability (high contrast bold typography)
 /// - Single-hand stall ergonomics
 /// - Minimal taps to complete weighing, carting, and checkout
-class PosScreen extends ConsumerWidget {
+class PosScreen extends ConsumerStatefulWidget {
   const PosScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PosScreen> createState() => _PosScreenState();
+}
+
+class _PosScreenState extends ConsumerState<PosScreen> {
+  bool _updateDialogShown = false;
+  bool _updateBannerDismissed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Clean up any lingering temporary APKs from previous updates
+    Future.microtask(() {
+      ref.read(updateServiceProvider).cleanOldUpdateFiles();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final activeProductsAsync = ref.watch(activeProductsProvider);
     final cart = ref.watch(cartProvider);
+    final updateAsync = ref.watch(availableUpdateProvider);
+
+    // Update notification handling:
+    // Never interrupt a sale. If cart is not empty, show dismissible banner instead of modal.
+    final availableUpdate = updateAsync.value;
+    if (availableUpdate != null && cart.lines.isEmpty && !_updateDialogShown) {
+      _updateDialogShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!context.mounted) return;
+        final versionInfo = await ref.read(installedVersionProvider.future);
+        if (!context.mounted) return;
+        UpdateDialog.show(
+          context,
+          release: availableUpdate,
+          currentVersion: versionInfo.version,
+        );
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -128,6 +165,58 @@ class PosScreen extends ConsumerWidget {
       ),
       body: Column(
         children: [
+          // Non-interruptive update banner when cart has items
+          if (availableUpdate != null &&
+              cart.lines.isNotEmpty &&
+              !_updateBannerDismissed)
+            Container(
+              color: const Color(0xFFEFF6FF),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.system_update_rounded,
+                    color: Colors.blueAccent,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () async {
+                        final versionInfo = await ref.read(
+                          installedVersionProvider.future,
+                        );
+                        if (context.mounted) {
+                          UpdateDialog.show(
+                            context,
+                            release: availableUpdate,
+                            currentVersion: versionInfo.version,
+                          );
+                        }
+                      },
+                      child: Text(
+                        'New update ${availableUpdate.rawTag} available. Tap to view.',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1E40AF),
+                        ),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.close,
+                      size: 18,
+                      color: Color(0xFF1E40AF),
+                    ),
+                    tooltip: 'Dismiss update notice',
+                    onPressed: () =>
+                        setState(() => _updateBannerDismissed = true),
+                  ),
+                ],
+              ),
+            ),
           if (ref.watch(backupNudgeNeededProvider))
             InkWell(
               onTap: () {

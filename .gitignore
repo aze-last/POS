@@ -50,3 +50,13 @@ app.*.map.json
 # Flutter DevTools
 devtools_options.yaml
 
+# Release signing & keystore
+key.properties
+**/android/key.properties
+*.jks
+*.keystore
+
+# Build & release artifacts
+releases/
+
+

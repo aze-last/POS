@@ -5,8 +5,8 @@ Baseline for the AI coder and the code reviewer. If code contradicts this file, 
 ## 1. Scope
 
 - Single-user Android app (Flutter/Dart), portrait only, English UI.
-- Offline-first. No backend, no login, no network calls, no analytics.
-- No API keys, tokens, or secrets anywhere in the app or repo. If cloud sync is ever added, the database must sit behind a backend. Never put keys or DB credentials in client code.
+- Offline-first. No backend, no login, no analytics. The ONLY allowed network activity is checking for and downloading updates from public GitHub Releases.
+- No API keys, tokens, or secrets anywhere in the app or repo. Unauthenticated public requests only. If cloud sync is ever added, the database must sit behind a backend. Never put keys or DB credentials in client code.
 - Products are sold BY THE KILO ONLY.
 - Starter products: Cardava, Binanggay, Tundan, Sab-a, Mundo, Lube. User can add, edit, archive, and reorder later.
 - Used one-handed at a market stall: large touch targets, high contrast, readable in sunlight.
@@ -147,7 +147,7 @@ settings(salary_mode, salary_percent_basis_points, fixed_daily_salary_centavos)
 ## 10. Reviewer checklist
 
 - [ ] No `double`/`float` for money or weight anywhere.
-- [ ] No network permission in AndroidManifest, no HTTP packages, no secrets in repo.
+- [ ] No secrets or API tokens in repo; network calls strictly limited to unauthenticated GitHub Releases update checks and downloads over HTTPS.
 - [ ] Single money formatter and single rounding function.
 - [ ] Snapshots stored on sale items and spoilage; no profit recomputed from live capital.
 - [ ] Voided sales excluded from every total.
@@ -156,6 +156,7 @@ settings(salary_mode, salary_percent_basis_points, fixed_daily_salary_centavos)
 - [ ] Destructive actions have confirmation.
 - [ ] Locked payout days cannot be silently modified.
 - [ ] Backup includes every table and a schema version.
+- [ ] In-app updates verify SHA-256 checksum and host allowlist before installing.
 
 ## 11. Delivery order
 
@@ -165,6 +166,7 @@ settings(salary_mode, salary_percent_basis_points, fixed_daily_salary_centavos)
 4. Sales history + void/edit.
 5. Expenses, Daily Summary, Payout, Parents' Balance, Settings.
 6. Backup/restore.
+7. Update checker, in-app update install, release workflow, and AGENTS.md.
 
 Stop after each step for manual testing. Do not start a step before the previous one passes tests.
 
