@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../config/update_config.dart';
@@ -28,6 +29,15 @@ class ReleaseInfo {
   });
 }
 
+/// Thrown when an update check fails due to missing or invalid release assets.
+class UpdateCheckException implements Exception {
+  final String message;
+  const UpdateCheckException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 /// Service managing update checks, secure downloads, checksum verification, and cleanup.
 class UpdateService {
   final http.Client _client;
@@ -45,20 +55,71 @@ class UpdateService {
     'github.com',
     'api.github.com',
     'objects.githubusercontent.com',
-    'github-releases.githubusercontent.com',
-    'raw.githubusercontent.com',
+    'release-assets.githubusercontent.com',
   ];
 
-  /// Validates that a URI is HTTPS and belongs to an allowed GitHub host.
+  /// Validates that a URI is HTTPS, belongs to an allowed GitHub host, and adheres to safe release paths (p7-11).
   static bool isHostAllowed(Uri uri) {
     if (uri.scheme.toLowerCase() != 'https') return false;
     final host = uri.host.toLowerCase();
-    for (final allowed in allowedHosts) {
-      if (host == allowed || host.endsWith('.$allowed')) {
-        return true;
-      }
+    final path = uri.path;
+
+    if (host == 'api.github.com') {
+      return path.startsWith('/repos/');
+    }
+    if (host == 'github.com') {
+      return path.contains('/releases/download/') ||
+          path.startsWith('/${UpdateConfig.githubOwner}/');
+    }
+    if (host == 'objects.githubusercontent.com' ||
+        host == 'release-assets.githubusercontent.com') {
+      return true;
     }
     return false;
+  }
+
+  /// Sends a GET request and safely follows HTTP redirects with allowlist re-validation on every hop (p7-3, p7-7).
+  Future<http.Response> _getWithAllowedRedirects(
+    Uri uri, {
+    Map<String, String>? headers,
+    int maxRedirects = 5,
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    Uri currentUri = uri;
+    for (int i = 0; i <= maxRedirects; i++) {
+      if (!isHostAllowed(currentUri)) {
+        throw SecurityException(
+          'Target URL rejected by host allowlist: $currentUri',
+        );
+      }
+      final request = http.Request('GET', currentUri);
+      request.followRedirects = false;
+      if (headers != null) {
+        request.headers.addAll(headers);
+      }
+
+      final streamed = await _client.send(request).timeout(timeout);
+      final response = await http.Response.fromStream(streamed)
+          .timeout(timeout);
+
+      final isRedirectStatus =
+          response.statusCode == 301 ||
+          response.statusCode == 302 ||
+          response.statusCode == 303 ||
+          response.statusCode == 307 ||
+          response.statusCode == 308;
+
+      if (response.isRedirect || isRedirectStatus) {
+        final location = response.headers['location'];
+        if (location == null) {
+          throw const HttpException('Redirect missing Location header');
+        }
+        currentUri = currentUri.resolve(location);
+        continue;
+      }
+      return response;
+    }
+    throw const HttpException('Exceeded maximum redirect hops (5)');
   }
 
   /// Gets the currently installed app version.
@@ -118,20 +179,13 @@ class UpdateService {
     }
 
     // 2. Fetch latest release from GitHub (unauthenticated, public HTTPS)
-    final response = await _client.get(
+    final response = await _getWithAllowedRedirects(
       UpdateConfig.latestReleaseUri,
       headers: {
         'Accept': 'application/vnd.github.v3+json',
         'User-Agent': 'Banana-POS',
       },
     );
-
-    // Record check timestamp
-    try {
-      await metaFile.writeAsString(
-        jsonEncode({'last_check': DateTime.now().toIso8601String()}),
-      );
-    } catch (_) {}
 
     if (response.statusCode != 200) {
       if (isManual) {
@@ -152,6 +206,13 @@ class UpdateService {
       return null;
     }
 
+    // Record check timestamp ONLY after HTTP 200 success (p7-8)
+    try {
+      await metaFile.writeAsString(
+        jsonEncode({'last_check': DateTime.now().toIso8601String()}),
+      );
+    } catch (_) {}
+
     final dynamic releaseData;
     try {
       releaseData = jsonDecode(response.body);
@@ -169,7 +230,14 @@ class UpdateService {
 
     final rawTag = releaseData['tag_name'] as String?;
     final tagVersion = AppVersion.tryParse(rawTag);
-    if (tagVersion == null) return null; // Malformed tag
+    if (tagVersion == null) {
+      if (isManual) {
+        throw const UpdateCheckException(
+          'Latest release has an invalid or missing version tag.',
+        );
+      }
+      return null; // Malformed tag
+    }
 
     final currentVersion = await getCurrentAppVersion();
     if (tagVersion <= currentVersion) {
@@ -184,26 +252,71 @@ class UpdateService {
       }
     }
 
-    // Locate .apk and .apk.sha256 assets
+    // Locate matching .apk and $apkName.sha256 assets (p7-10)
     final assets = releaseData['assets'] as List?;
-    if (assets == null) return null;
+    if (assets == null) {
+      if (isManual) {
+        throw const UpdateCheckException('Latest release contains no assets.');
+      }
+      return null;
+    }
 
     Map? apkAsset;
     Map? sha256Asset;
 
+    // Prefer an APK that has a matching .sha256 checksum asset
     for (final a in assets) {
       if (a is Map) {
         final name = (a['name'] as String?)?.toLowerCase() ?? '';
-        if (name.endsWith('.apk.sha256') || name.endsWith('.sha256')) {
-          sha256Asset = a;
-        } else if (name.endsWith('.apk')) {
-          apkAsset = a;
+        if (name.endsWith('.apk')) {
+          final expectedSha = '$name.sha256';
+          final hasSha = assets.any(
+            (other) =>
+                other is Map &&
+                (other['name'] as String?)?.toLowerCase() == expectedSha,
+          );
+          if (hasSha) {
+            apkAsset = a;
+            break;
+          }
         }
       }
     }
 
-    // Both .apk and .apk.sha256 are strictly required for security
+    // Fallback to first .apk if no pre-paired APK found
+    if (apkAsset == null) {
+      for (final a in assets) {
+        if (a is Map) {
+          final name = (a['name'] as String?)?.toLowerCase() ?? '';
+          if (name.endsWith('.apk')) {
+            apkAsset = a;
+            break;
+          }
+        }
+      }
+    }
+
+    if (apkAsset != null) {
+      final apkActualName = (apkAsset['name'] as String).toLowerCase();
+      final expectedShaName = '$apkActualName.sha256';
+      for (final a in assets) {
+        if (a is Map) {
+          final name = (a['name'] as String?)?.toLowerCase() ?? '';
+          if (name == expectedShaName) {
+            sha256Asset = a;
+            break;
+          }
+        }
+      }
+    }
+
+    // Both matching .apk and .sha256 are strictly required for security
     if (apkAsset == null || sha256Asset == null) {
+      if (isManual) {
+        throw const UpdateCheckException(
+          'Latest release is missing matching APK or SHA-256 checksum asset.',
+        );
+      }
       return null;
     }
 
@@ -211,9 +324,14 @@ class UpdateService {
     final sha256Url = sha256Asset['browser_download_url'] as String?;
     final apkName = apkAsset['name'] as String? ?? 'banana-pos.apk';
 
-    if (apkUrl == null || sha256Url == null) return null;
+    if (apkUrl == null || sha256Url == null) {
+      if (isManual) {
+        throw const UpdateCheckException('Asset download URLs are missing.');
+      }
+      return null;
+    }
 
-    // Verify host allowlist
+    // Verify host allowlist upfront
     if (!isHostAllowed(Uri.parse(apkUrl)) ||
         !isHostAllowed(Uri.parse(sha256Url))) {
       throw const SecurityException(
@@ -240,13 +358,18 @@ class UpdateService {
   }) async {
     final apkUri = Uri.parse(release.apkDownloadUrl);
     final sha256Uri = Uri.parse(release.sha256DownloadUrl);
+    const timeout = Duration(seconds: 15);
+    const maxDownloadBytes = 150 * 1024 * 1024; // 150MB cap (p7-7)
 
     if (!isHostAllowed(apkUri) || !isHostAllowed(sha256Uri)) {
       throw const SecurityException('Download aborted: non-allowlisted host');
     }
 
-    // 1. Fetch expected SHA-256 hash
-    final shaResponse = await _client.get(sha256Uri);
+    // 1. Fetch expected SHA-256 hash with redirect following & validation (p7-3, p7-7)
+    final shaResponse = await _getWithAllowedRedirects(
+      sha256Uri,
+      timeout: timeout,
+    );
     if (shaResponse.statusCode != 200) {
       throw HttpException(
         'Failed to download SHA-256 checksum (HTTP ${shaResponse.statusCode})',
@@ -262,15 +385,64 @@ class UpdateService {
     }
     final expectedHash = hexMatch.group(0)!.toLowerCase();
 
-    // 2. Download APK to cache directory
+    // 2. Sanitize filename and create target file in updates/ directory (p7-2, p7-13)
+    final safeFileName = p.basename(release.apkFileName);
+    if (!safeFileName.toLowerCase().endsWith('.apk') ||
+        safeFileName.contains('/') ||
+        safeFileName.contains('\\')) {
+      throw const SecurityException(
+        'Invalid or dangerous APK filename in release',
+      );
+    }
+
     final cacheDir = await getCacheDirectory();
-    final targetFile = File('${cacheDir.path}/${release.apkFileName}');
+    final updatesDir = Directory('${cacheDir.path}/updates');
+    if (!await updatesDir.exists()) {
+      await updatesDir.create(recursive: true);
+    }
+
+    final targetFile = File('${updatesDir.path}/$safeFileName');
     if (await targetFile.exists()) {
       await targetFile.delete();
     }
 
-    final request = http.Request('GET', apkUri);
-    final streamedResponse = await _client.send(request);
+    // Follow redirects for APK download with host validation on every hop (p7-3, p7-7)
+    Uri currentApkUri = apkUri;
+    http.StreamedResponse? streamedResponse;
+
+    for (int i = 0; i <= 5; i++) {
+      if (!isHostAllowed(currentApkUri)) {
+        throw SecurityException(
+          'Download redirected to non-allowlisted host: $currentApkUri',
+        );
+      }
+      final req = http.Request('GET', currentApkUri);
+      req.followRedirects = false;
+      final res = await _client.send(req).timeout(timeout);
+      final isRedirectStatus =
+          res.statusCode == 301 ||
+          res.statusCode == 302 ||
+          res.statusCode == 303 ||
+          res.statusCode == 307 ||
+          res.statusCode == 308;
+
+      if (res.isRedirect || isRedirectStatus) {
+        final location = res.headers['location'];
+        if (location == null) {
+          throw const HttpException('Redirect missing Location header');
+        }
+        currentApkUri = currentApkUri.resolve(location);
+        continue;
+      }
+      streamedResponse = res;
+      break;
+    }
+
+    if (streamedResponse == null) {
+      throw const HttpException(
+        'Exceeded maximum redirect hops for APK download',
+      );
+    }
 
     if (streamedResponse.statusCode != 200) {
       throw HttpException(
@@ -283,7 +455,7 @@ class UpdateService {
 
     final sink = targetFile.openWrite();
     try {
-      await for (final chunk in streamedResponse.stream) {
+      await for (final chunk in streamedResponse.stream.timeout(timeout)) {
         if (isCancelled != null && isCancelled()) {
           await sink.close();
           if (await targetFile.exists()) await targetFile.delete();
@@ -291,6 +463,13 @@ class UpdateService {
         }
         sink.add(chunk);
         receivedBytes += chunk.length;
+        if (receivedBytes > maxDownloadBytes) {
+          await sink.close();
+          if (await targetFile.exists()) await targetFile.delete();
+          throw const SecurityException(
+            'Download aborted: file exceeds 150MB maximum size limit',
+          );
+        }
         if (onProgress != null && totalBytes > 0) {
           onProgress(receivedBytes, totalBytes);
         }
@@ -342,11 +521,21 @@ class UpdateService {
   Future<void> cleanOldUpdateFiles() async {
     try {
       final cacheDir = await getCacheDirectory();
-      if (!await cacheDir.exists()) return;
-      final entities = cacheDir.listSync();
-      for (final entity in entities) {
-        if (entity is File && entity.path.toLowerCase().endsWith('.apk')) {
-          await entity.delete();
+      final updatesDir = Directory('${cacheDir.path}/updates');
+      if (await updatesDir.exists()) {
+        final entities = updatesDir.listSync();
+        for (final entity in entities) {
+          if (entity is File && entity.path.toLowerCase().endsWith('.apk')) {
+            await entity.delete();
+          }
+        }
+      }
+      if (await cacheDir.exists()) {
+        final entities = cacheDir.listSync();
+        for (final entity in entities) {
+          if (entity is File && entity.path.toLowerCase().endsWith('.apk')) {
+            await entity.delete();
+          }
         }
       }
     } catch (_) {}

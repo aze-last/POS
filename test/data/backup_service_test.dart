@@ -113,7 +113,7 @@ void main() {
 
       final export = await service.exportData();
 
-      expect(export['schema_version'], 1);
+      expect(export['schema_version'], BackupService.currentSchemaVersion);
       expect(export['app'], 'Banana POS');
       expect(export['exported_at'], isNotNull);
 
@@ -122,6 +122,7 @@ void main() {
       expect((tables['capital_history'] as List).length, 1);
       expect((tables['sales'] as List).length, 1);
       expect((tables['sale_items'] as List).length, 1);
+      expect((tables['sale_edits'] as List).length, 0);
       expect((tables['expenses'] as List).length, 2);
       expect((tables['restock_purchases'] as List).length, 1);
       expect((tables['payouts'] as List).length, 1);
@@ -207,6 +208,18 @@ void main() {
               ),
             );
 
+        await db
+            .into(db.saleEdits)
+            .insert(
+              SaleEditsCompanion.insert(
+                saleId: saleId,
+                editedAt: exportDate,
+                beforeJson: '{"charged_centavos":6000}',
+                afterJson: '{"charged_centavos":5500}',
+                reason: const Value('Customer discount'),
+              ),
+            );
+
         // Export to JSON string
         final jsonString = await service.exportToJsonString();
         expect(jsonString.isNotEmpty, isTrue);
@@ -240,6 +253,11 @@ void main() {
           expect(targetItems.first.grams, 2000);
           expect(targetItems.first.productNameSnapshot, 'Cardava');
 
+          // Verify Sale Edits
+          final targetEdits = await targetDb.select(targetDb.saleEdits).get();
+          expect(targetEdits.length, 1);
+          expect(targetEdits.first.reason, 'Customer discount');
+
           // Verify Expenses
           final targetExpenses = await targetDb.select(targetDb.expenses).get();
           expect(targetExpenses.length, 1);
@@ -262,6 +280,148 @@ void main() {
         }
       },
     );
+
+    test('restoreFromJsonString seamlessly imports legacy schema_version 1 backups', () async {
+      final legacyJson = jsonEncode({
+        'schema_version': 1,
+        'app': 'Banana POS',
+        'exported_at': '2026-11-15T10:00:00.000',
+        'tables': {
+          'products': [
+            {
+              'id': 1,
+              'name': 'Cardava',
+              'default_price_centavos': 3000,
+              'capital_centavos': 2000,
+              'sort_order': 0,
+              'archived': false,
+            },
+          ],
+          'settings': [
+            {
+              'id': 1,
+              'salary_mode': 'percent',
+              'salary_percent_basis_points': 3000,
+              'fixed_daily_salary_centavos': 0,
+            },
+          ],
+          'capital_history': [],
+          'sales': [
+            {
+              'id': 1,
+              'created_at': '2026-11-15T12:00:00.000',
+              'exact_total_centavos': 3000,
+              'charged_centavos': 3000,
+              'paid_centavos': 3000,
+              'change_centavos': 0,
+              'voided': false,
+            },
+          ],
+          'sale_items': [
+            {
+              'id': 1,
+              'sale_id': 1,
+              'product_id': 1,
+              'product_name_snapshot': 'Cardava',
+              'grams': 1000,
+              'price_per_kg_centavos': 3000,
+              'capital_per_kg_centavos': 2000,
+            },
+          ],
+          'expenses': [],
+          'restock_purchases': [],
+          'payouts': [],
+        },
+      });
+
+      final targetDb = AppDatabase(NativeDatabase.memory());
+      final targetService = BackupService(targetDb);
+
+      try {
+        await targetService.restoreFromJsonString(legacyJson);
+
+        final sales = await targetDb.select(targetDb.sales).get();
+        expect(sales.length, 1);
+        expect(sales.first.editCount, 0);
+        expect(sales.first.editedAt == null, isTrue);
+
+        final edits = await targetDb.select(targetDb.saleEdits).get();
+        expect(edits.isEmpty, isTrue);
+      } finally {
+        await targetDb.close();
+      }
+    });
+
+    test('restoreFromJsonString seamlessly imports legacy schema_version 1 backups', () async {
+      final legacyJson = jsonEncode({
+        'schema_version': 1,
+        'app': 'Banana POS',
+        'exported_at': '2026-11-15T10:00:00.000',
+        'tables': {
+          'products': [
+            {
+              'id': 1,
+              'name': 'Cardava',
+              'default_price_centavos': 3000,
+              'capital_centavos': 2000,
+              'sort_order': 0,
+              'archived': false,
+            },
+          ],
+          'settings': [
+            {
+              'id': 1,
+              'salary_mode': 'percent',
+              'salary_percent_basis_points': 3000,
+              'fixed_daily_salary_centavos': 0,
+            },
+          ],
+          'capital_history': [],
+          'sales': [
+            {
+              'id': 1,
+              'created_at': '2026-11-15T12:00:00.000',
+              'exact_total_centavos': 3000,
+              'charged_centavos': 3000,
+              'paid_centavos': 3000,
+              'change_centavos': 0,
+              'voided': false,
+            },
+          ],
+          'sale_items': [
+            {
+              'id': 1,
+              'sale_id': 1,
+              'product_id': 1,
+              'product_name_snapshot': 'Cardava',
+              'grams': 1000,
+              'price_per_kg_centavos': 3000,
+              'capital_per_kg_centavos': 2000,
+            },
+          ],
+          'expenses': [],
+          'restock_purchases': [],
+          'payouts': [],
+        },
+      });
+
+      final targetDb = AppDatabase(NativeDatabase.memory());
+      final targetService = BackupService(targetDb);
+
+      try {
+        await targetService.restoreFromJsonString(legacyJson);
+
+        final sales = await targetDb.select(targetDb.sales).get();
+        expect(sales.length, 1);
+        expect(sales.first.editCount, 0);
+        expect(sales.first.editedAt == null, isTrue);
+
+        final edits = await targetDb.select(targetDb.saleEdits).get();
+        expect(edits.isEmpty, isTrue);
+      } finally {
+        await targetDb.close();
+      }
+    });
 
     test('restoreFromJsonString rejects invalid schema_version or corrupted JSON without modifying database', () async {
       final initialProducts = await db.select(db.products).get();

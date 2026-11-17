@@ -25,7 +25,9 @@ void main() {
     test('Host allowlist accepts GitHub domains and rejects non-allowlisted/HTTP hosts', () {
       expect(
         UpdateService.isHostAllowed(
-          Uri.parse('https://github.com/aze-last/POS'),
+          Uri.parse(
+            'https://github.com/aze-last/POS/releases/download/v1.0.0/app.apk',
+          ),
         ),
         isTrue,
       );
@@ -37,7 +39,15 @@ void main() {
       );
       expect(
         UpdateService.isHostAllowed(
-          Uri.parse('https://api.github.com/repos/aze-last/POS'),
+          Uri.parse(
+            'https://release-assets.githubusercontent.com/github-production-release-asset/123/asset.apk',
+          ),
+        ),
+        isTrue,
+      );
+      expect(
+        UpdateService.isHostAllowed(
+          Uri.parse('https://api.github.com/repos/aze-last/POS/releases'),
         ),
         isTrue,
       );
@@ -56,6 +66,12 @@ void main() {
       );
       expect(
         UpdateService.isHostAllowed(
+          Uri.parse('https://raw.githubusercontent.com/malicious/file.apk'),
+        ),
+        isFalse,
+      );
+      expect(
+        UpdateService.isHostAllowed(
           Uri.parse('https://github.com.evil.com/file.apk'),
         ),
         isFalse,
@@ -63,7 +79,7 @@ void main() {
     });
 
     test(
-      'parses valid release with both .apk and .apk.sha256 assets',
+      'parses valid release with matching .apk and .sha256 assets',
       () async {
         final mockJson = jsonEncode({
           'tag_name': 'v1.0.10',
@@ -103,7 +119,7 @@ void main() {
       },
     );
 
-    test('returns null when .apk or .sha256 asset is missing', () async {
+    test('returns null for auto-check and throws for manual check when assets are missing or mismatched', () async {
       final mockJsonMissingSha = jsonEncode({
         'tag_name': 'v1.0.1',
         'draft': false,
@@ -112,8 +128,7 @@ void main() {
         'assets': [
           {
             'name': 'banana-pos-v1.0.1.apk',
-            'browser_download_url':
-                'https://github.com/aze-last/POS/releases/v1.0.1/app.apk',
+            'browser_download_url': 'https://github.com/aze-last/POS/releases/download/v1.0.1/banana-pos-v1.0.1.apk',
           },
         ],
       });
@@ -128,8 +143,47 @@ void main() {
         currentVersionProvider: () async => '1.0.0',
       );
 
-      final update = await service.checkForUpdate(isManual: true);
-      expect(update, isNull);
+      final autoCheck = await service.checkForUpdate(isManual: false);
+      expect(autoCheck, isNull);
+
+      await expectLater(
+        service.checkForUpdate(isManual: true),
+        throwsA(isA<UpdateCheckException>()),
+      );
+    });
+
+    test('rejects mismatched sha256 filename for manual checks', () async {
+      final mockJsonMismatchedSha = jsonEncode({
+        'tag_name': 'v1.0.2',
+        'draft': false,
+        'prerelease': false,
+        'body': 'Notes',
+        'assets': [
+          {
+            'name': 'banana-pos-v1.0.2.apk',
+            'browser_download_url': 'https://github.com/aze-last/POS/releases/download/v1.0.2/banana-pos-v1.0.2.apk',
+          },
+          {
+            'name': 'other-app.apk.sha256',
+            'browser_download_url': 'https://github.com/aze-last/POS/releases/download/v1.0.2/other-app.apk.sha256',
+          },
+        ],
+      });
+
+      final client = MockClient((request) async {
+        return http.Response(mockJsonMismatchedSha, 200);
+      });
+
+      final service = UpdateService(
+        client: client,
+        cacheDirProvider: () async => tempDir,
+        currentVersionProvider: () async => '1.0.0',
+      );
+
+      await expectLater(
+        service.checkForUpdate(isManual: true),
+        throwsA(isA<UpdateCheckException>()),
+      );
     });
 
     test('ignores drafts and prereleases', () async {
@@ -140,11 +194,11 @@ void main() {
         'assets': [
           {
             'name': 'app.apk',
-            'browser_download_url': 'https://github.com/app.apk',
+            'browser_download_url': 'https://github.com/aze-last/POS/releases/download/v2.0.0/app.apk',
           },
           {
             'name': 'app.apk.sha256',
-            'browser_download_url': 'https://github.com/app.apk.sha256',
+            'browser_download_url': 'https://github.com/aze-last/POS/releases/download/v2.0.0/app.apk.sha256',
           },
         ],
       });
@@ -162,35 +216,107 @@ void main() {
       expect(await service.checkForUpdate(isManual: true), isNull);
     });
 
-    test('never downgrades when candidate release is older or equal', () async {
-      final mockJson = jsonEncode({
-        'tag_name': 'v1.0.0',
+    test('never downgrades when candidate release is older or equal including +BUILD numbers', () async {
+      final mockJsonOlder = jsonEncode({
+        'tag_name': 'v1.0.0+1',
         'draft': false,
         'prerelease': false,
         'assets': [
           {
-            'name': 'app.apk',
-            'browser_download_url': 'https://github.com/app.apk',
+            'name': 'banana-pos.apk',
+            'browser_download_url': 'https://github.com/aze-last/POS/releases/download/v1.0.0/banana-pos.apk',
           },
           {
-            'name': 'app.apk.sha256',
-            'browser_download_url': 'https://github.com/app.apk.sha256',
+            'name': 'banana-pos.apk.sha256',
+            'browser_download_url': 'https://github.com/aze-last/POS/releases/download/v1.0.0/banana-pos.apk.sha256',
           },
         ],
       });
 
-      final client = MockClient(
-        (request) async => http.Response(mockJson, 200),
+      final clientOlder = MockClient(
+        (request) async => http.Response(mockJsonOlder, 200),
       );
 
-      final service = UpdateService(
-        client: client,
+      final serviceOlder = UpdateService(
+        client: clientOlder,
         cacheDirProvider: () async => tempDir,
-        currentVersionProvider: () async => '1.0.5',
+        currentVersionProvider: () async => '1.0.0+2',
       );
 
-      expect(await service.checkForUpdate(isManual: true), isNull);
+      expect(await serviceOlder.checkForUpdate(isManual: true), isNull);
+
+      // Candidate newer by build number
+      final mockJsonNewer = jsonEncode({
+        'tag_name': 'v1.0.0+3',
+        'draft': false,
+        'prerelease': false,
+        'assets': [
+          {
+            'name': 'banana-pos.apk',
+            'browser_download_url': 'https://github.com/aze-last/POS/releases/download/v1.0.0/banana-pos.apk',
+          },
+          {
+            'name': 'banana-pos.apk.sha256',
+            'browser_download_url': 'https://github.com/aze-last/POS/releases/download/v1.0.0/banana-pos.apk.sha256',
+          },
+        ],
+      });
+
+      final clientNewer = MockClient(
+        (request) async => http.Response(mockJsonNewer, 200),
+      );
+
+      final serviceNewer = UpdateService(
+        client: clientNewer,
+        cacheDirProvider: () async => tempDir,
+        currentVersionProvider: () async => '1.0.0+2',
+      );
+
+      final update = await serviceNewer.checkForUpdate(isManual: true);
+      expect(update, isNotNull);
+      expect(
+        update!.version,
+        const AppVersion(major: 1, minor: 0, patch: 0, build: 3),
+      );
     });
+
+    test(
+      'checkForUpdate rejects candidate release with off-allowlist asset URLs',
+      () async {
+        final mockJsonEvil = jsonEncode({
+          'tag_name': 'v2.0.0',
+          'draft': false,
+          'prerelease': false,
+          'assets': [
+            {
+              'name': 'banana-pos.apk',
+              'browser_download_url':
+                  'https://malicious-site.com/banana-pos.apk',
+            },
+            {
+              'name': 'banana-pos.apk.sha256',
+              'browser_download_url':
+                  'https://malicious-site.com/banana-pos.apk.sha256',
+            },
+          ],
+        });
+
+        final client = MockClient(
+          (request) async => http.Response(mockJsonEvil, 200),
+        );
+
+        final service = UpdateService(
+          client: client,
+          cacheDirProvider: () async => tempDir,
+          currentVersionProvider: () async => '1.0.0',
+        );
+
+        await expectLater(
+          service.checkForUpdate(isManual: true),
+          throwsA(isA<SecurityException>()),
+        );
+      },
+    );
 
     test(
       'enforces 24-hour throttle for auto-checks but allows manual checks',
@@ -202,11 +328,11 @@ void main() {
           'assets': [
             {
               'name': 'app.apk',
-              'browser_download_url': 'https://github.com/app.apk',
+              'browser_download_url': 'https://github.com/aze-last/POS/releases/download/v1.1.0/app.apk',
             },
             {
               'name': 'app.apk.sha256',
-              'browser_download_url': 'https://github.com/app.apk.sha256',
+              'browser_download_url': 'https://github.com/aze-last/POS/releases/download/v1.1.0/app.apk.sha256',
             },
           ],
         });
@@ -240,43 +366,47 @@ void main() {
       },
     );
 
-    test(
-      'handles 403 rate limit, 404 not found, and offline gracefully',
-      () async {
-        // 403 test
-        final client403 = MockClient(
-          (request) async => http.Response('Rate limit', 403),
-        );
-        final service403 = UpdateService(
-          client: client403,
-          cacheDirProvider: () async => tempDir,
-          currentVersionProvider: () async => '1.0.0',
-        );
+    test('handles 403 rate limit, 404 not found, and offline gracefully without saving throttle timestamp', () async {
+      final metaFile = File('${tempDir.path}/update_check_meta.json');
 
-        // Auto-check fails silently without crash
-        expect(await service403.checkForUpdate(isManual: false), isNull);
-        // Manual check throws clear HttpException
-        expect(
-          () => service403.checkForUpdate(isManual: true),
-          throwsA(isA<HttpException>()),
-        );
+      // 403 test
+      final client403 = MockClient(
+        (request) async => http.Response('Rate limit', 403),
+      );
+      final service403 = UpdateService(
+        client: client403,
+        cacheDirProvider: () async => tempDir,
+        currentVersionProvider: () async => '1.0.0',
+      );
 
-        // 404 test
-        final client404 = MockClient(
-          (request) async => http.Response('Not Found', 404),
-        );
-        final service404 = UpdateService(
-          client: client404,
-          cacheDirProvider: () async => tempDir,
-          currentVersionProvider: () async => '1.0.0',
-        );
-        expect(await service404.checkForUpdate(isManual: false), isNull);
-        expect(
-          () => service404.checkForUpdate(isManual: true),
-          throwsA(isA<HttpException>()),
-        );
-      },
-    );
+      expect(await service403.checkForUpdate(isManual: false), isNull);
+      expect(
+        await metaFile.exists(),
+        isFalse,
+      ); // Throttle NOT saved on error (p7-8)
+
+      expect(
+        () => service403.checkForUpdate(isManual: true),
+        throwsA(isA<HttpException>()),
+      );
+
+      // 404 test
+      final client404 = MockClient(
+        (request) async => http.Response('Not Found', 404),
+      );
+      final service404 = UpdateService(
+        client: client404,
+        cacheDirProvider: () async => tempDir,
+        currentVersionProvider: () async => '1.0.0',
+      );
+      expect(await service404.checkForUpdate(isManual: false), isNull);
+      expect(await metaFile.exists(), isFalse);
+
+      expect(
+        () => service404.checkForUpdate(isManual: true),
+        throwsA(isA<HttpException>()),
+      );
+    });
 
     test(
       'skipped-version logic ignores skipped tag during auto-checks',
@@ -288,11 +418,11 @@ void main() {
           'assets': [
             {
               'name': 'app.apk',
-              'browser_download_url': 'https://github.com/app.apk',
+              'browser_download_url': 'https://github.com/aze-last/POS/releases/download/v1.0.5/app.apk',
             },
             {
               'name': 'app.apk.sha256',
-              'browser_download_url': 'https://github.com/app.apk.sha256',
+              'browser_download_url': 'https://github.com/aze-last/POS/releases/download/v1.0.5/app.apk.sha256',
             },
           ],
         });
@@ -327,7 +457,7 @@ void main() {
         final client = MockClient((request) async {
           final path = request.url.path;
           if (path.endsWith('.sha256')) {
-            return http.Response('$expectedHash  banana-pos-v1.0.1.apk', 200);
+            return http.Response('$expectedHash  banana.apk', 200);
           } else if (path.endsWith('.apk')) {
             return http.Response.bytes(
               apkBytes,
@@ -347,10 +477,9 @@ void main() {
           version: AppVersion(major: 1, minor: 0, patch: 1),
           rawTag: 'v1.0.1',
           releaseNotes: 'Fixes',
-          apkDownloadUrl: 'https://github.com/aze-last/POS/releases/banana.apk',
+          apkDownloadUrl: 'https://github.com/aze-last/POS/releases/download/v1.0.1/banana.apk',
           apkFileName: 'banana.apk',
-          sha256DownloadUrl:
-              'https://github.com/aze-last/POS/releases/banana.apk.sha256',
+          sha256DownloadUrl: 'https://github.com/aze-last/POS/releases/download/v1.0.1/banana.apk.sha256',
         );
 
         final downloadedFile = await service.downloadAndVerifyUpdate(
@@ -360,6 +489,97 @@ void main() {
         expect(
           await downloadedFile.readAsString(),
           equals('DUMMY APK BINARY CONTENT'),
+        );
+      },
+    );
+
+    test('downloadAndVerifyUpdate safely follows valid redirects', () async {
+      final apkBytes = utf8.encode('DUMMY APK BINARY CONTENT VIA REDIRECT');
+      final expectedHash = sha256.convert(apkBytes).toString();
+
+      final client = MockClient((request) async {
+        if (request.url.path.endsWith('.sha256')) {
+          return http.Response('$expectedHash  banana.apk', 200);
+        }
+        if (request.url.host == 'github.com') {
+          return http.Response(
+            '',
+            302,
+            headers: {
+              'location':
+                  'https://objects.githubusercontent.com/download/banana.apk',
+            },
+          );
+        }
+        if (request.url.host == 'objects.githubusercontent.com') {
+          return http.Response.bytes(
+            apkBytes,
+            200,
+            headers: {'content-length': apkBytes.length.toString()},
+          );
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final service = UpdateService(
+        client: client,
+        cacheDirProvider: () async => tempDir,
+      );
+
+      final release = const ReleaseInfo(
+        version: AppVersion(major: 1, minor: 0, patch: 1),
+        rawTag: 'v1.0.1',
+        releaseNotes: 'Fixes',
+        apkDownloadUrl: 'https://github.com/aze-last/POS/releases/download/v1.0.1/banana.apk',
+        apkFileName: 'banana.apk',
+        sha256DownloadUrl: 'https://github.com/aze-last/POS/releases/download/v1.0.1/banana.apk.sha256',
+      );
+
+      final downloadedFile = await service.downloadAndVerifyUpdate(
+        release: release,
+      );
+      expect(await downloadedFile.exists(), isTrue);
+      expect(
+        await downloadedFile.readAsString(),
+        equals('DUMMY APK BINARY CONTENT VIA REDIRECT'),
+      );
+    });
+
+    test(
+      'downloadAndVerifyUpdate rejects redirect to non-allowlisted host',
+      () async {
+        final apkBytes = utf8.encode('MALICIOUS CONTENT');
+        final expectedHash = sha256.convert(apkBytes).toString();
+
+        final client = MockClient((request) async {
+          if (request.url.path.endsWith('.sha256')) {
+            return http.Response('$expectedHash  banana.apk', 200);
+          }
+          // Redirects to evil site
+          return http.Response(
+            '',
+            302,
+            headers: {'location': 'https://evil-site.com/banana.apk'},
+          );
+        });
+
+        final service = UpdateService(
+          client: client,
+          cacheDirProvider: () async => tempDir,
+        );
+
+        final release = const ReleaseInfo(
+          version: AppVersion(major: 1, minor: 0, patch: 1),
+          rawTag: 'v1.0.1',
+          releaseNotes: 'Fixes',
+          apkDownloadUrl: 'https://github.com/aze-last/POS/releases/download/v1.0.1/banana.apk',
+          apkFileName: 'banana.apk',
+          sha256DownloadUrl: 'https://github.com/aze-last/POS/releases/download/v1.0.1/banana.apk.sha256',
+        );
+
+        await expectLater(
+          service.downloadAndVerifyUpdate(release: release),
+          throwsA(isA<SecurityException>()),
         );
       },
     );
@@ -390,41 +610,39 @@ void main() {
           version: AppVersion(major: 1, minor: 0, patch: 1),
           rawTag: 'v1.0.1',
           releaseNotes: 'Fixes',
-          apkDownloadUrl: 'https://github.com/aze-last/POS/releases/banana.apk',
+          apkDownloadUrl: 'https://github.com/aze-last/POS/releases/download/v1.0.1/banana.apk',
           apkFileName: 'banana.apk',
-          sha256DownloadUrl:
-              'https://github.com/aze-last/POS/releases/banana.apk.sha256',
+          sha256DownloadUrl: 'https://github.com/aze-last/POS/releases/download/v1.0.1/banana.apk.sha256',
         );
 
-        expect(
-          () => service.downloadAndVerifyUpdate(release: release),
+        await expectLater(
+          service.downloadAndVerifyUpdate(release: release),
           throwsA(isA<SecurityException>()),
         );
 
         // Verify file was purged immediately
-        final targetFile = File('${tempDir.path}/banana.apk');
+        final targetFile = File('${tempDir.path}/updates/banana.apk');
         expect(await targetFile.exists(), isFalse);
       },
     );
 
-    test(
-      'cleanOldUpdateFiles purges all .apk files in cache directory',
-      () async {
-        final file1 = File('${tempDir.path}/old1.apk');
-        final file2 = File('${tempDir.path}/old2.apk');
-        final textFile = File('${tempDir.path}/keep.txt');
+    test('cleanOldUpdateFiles purges all .apk files in cache and updates directory', () async {
+      final updatesDir = Directory('${tempDir.path}/updates');
+      await updatesDir.create();
+      final file1 = File('${updatesDir.path}/old1.apk');
+      final file2 = File('${tempDir.path}/old2.apk');
+      final textFile = File('${tempDir.path}/keep.txt');
 
-        await file1.writeAsString('test');
-        await file2.writeAsString('test');
-        await textFile.writeAsString('test');
+      await file1.writeAsString('test');
+      await file2.writeAsString('test');
+      await textFile.writeAsString('test');
 
-        final service = UpdateService(cacheDirProvider: () async => tempDir);
-        await service.cleanOldUpdateFiles();
+      final service = UpdateService(cacheDirProvider: () async => tempDir);
+      await service.cleanOldUpdateFiles();
 
-        expect(await file1.exists(), isFalse);
-        expect(await file2.exists(), isFalse);
-        expect(await textFile.exists(), isTrue);
-      },
-    );
+      expect(await file1.exists(), isFalse);
+      expect(await file2.exists(), isFalse);
+      expect(await textFile.exists(), isTrue);
+    });
   });
 }

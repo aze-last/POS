@@ -49,6 +49,7 @@ final payoutForDayProvider = StreamProvider.autoDispose
 class DailySummaryState {
   final DateTime date;
   final int salesCount;
+  final int editedSalesCount;
   final int totalChargedCentavos;
   final int capitalSoldCentavos;
   final int grossProfitCentavos;
@@ -59,10 +60,12 @@ class DailySummaryState {
   final DailyPayoutCalculation calculation;
   final Payout? payout;
   final bool isLocked;
+  final Setting settings;
 
   const DailySummaryState({
     required this.date,
     required this.salesCount,
+    required this.editedSalesCount,
     required this.totalChargedCentavos,
     required this.capitalSoldCentavos,
     required this.grossProfitCentavos,
@@ -73,7 +76,12 @@ class DailySummaryState {
     required this.calculation,
     required this.payout,
     required this.isLocked,
+    required this.settings,
   });
+
+  /// True if this day was previously marked as paid out, then reopened, and has edited sales.
+  bool get showReopenedEditBanner =>
+      payout != null && !isLocked && editedSalesCount > 0;
 }
 
 /// Comprehensive daily summary provider for a specific calendar date.
@@ -158,9 +166,14 @@ final dailySummaryStateProvider = StreamProvider.autoDispose
           actualSalaryCentavos: actualSalary,
         );
 
+        final editedCount = activeSales
+            .where((s) => s.sale.editCount > 0)
+            .length;
+
         return DailySummaryState(
           date: date,
           salesCount: activeSales.length,
+          editedSalesCount: editedCount,
           totalChargedCentavos: totalCharged,
           capitalSoldCentavos: capitalSold,
           grossProfitCentavos: totalCharged - capitalSold,
@@ -171,6 +184,7 @@ final dailySummaryStateProvider = StreamProvider.autoDispose
           calculation: calculation,
           payout: payout,
           isLocked: isLocked,
+          settings: settings,
         );
       });
     });

@@ -6,7 +6,10 @@ import '../../../data/repositories/sale_repository.dart';
 import '../../../domain/models/weight.dart';
 import '../../../domain/services/pricing_calculator.dart';
 import '../../../domain/utils/formatters.dart';
+import '../../providers/sale_providers.dart';
 import '../../theme/app_theme.dart';
+import 'edit_sale_dialog.dart';
+import 'sale_edit_history_dialog.dart';
 import 'void_confirmation_dialog.dart';
 
 /// Modal bottom sheet displaying complete audit details for a completed or voided sale.
@@ -77,13 +80,59 @@ class SaleDetailSheet extends ConsumerWidget {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Sale #${sale.id}',
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                          color: AppTheme.primaryDark,
-                        ),
+                      Row(
+                        children: [
+                          Text(
+                            'Sale #${sale.id}',
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                              color: AppTheme.primaryDark,
+                            ),
+                          ),
+                          if (sale.editCount > 0) ...[
+                            const SizedBox(width: 8),
+                            InkWell(
+                              borderRadius: BorderRadius.circular(6),
+                              onTap: () => SaleEditHistoryDialog.show(
+                                context,
+                                saleId: sale.id,
+                              ),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.shade50,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: Colors.blue.shade300,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.edit_note,
+                                      size: 14,
+                                      color: Colors.blue.shade800,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Edited (${sale.editCount})',
+                                      style: TextStyle(
+                                        color: Colors.blue.shade900,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 2),
                       Text(
@@ -301,7 +350,75 @@ class SaleDetailSheet extends ConsumerWidget {
               const SizedBox(height: 24),
 
               // Actions
-              if (!isVoided)
+              if (!isVoided) ...[
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryDark,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(50),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text(
+                    'Edit This Sale',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: () async {
+                    final repo = ref.read(saleRepositoryProvider);
+                    final isLocked = await repo.isDayLocked(sale.createdAt);
+
+                    if (isLocked) {
+                      if (!context.mounted) return;
+                      final reopen = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Day Payout Locked'),
+                          content: const Text(
+                            'This day is paid out. Reopen it first.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(false),
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: AppTheme.warningAmber,
+                              ),
+                              onPressed: () => Navigator.of(ctx).pop(true),
+                              child: const Text('Reopen Day'),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (reopen == true) {
+                        await repo.reopenDay(sale.createdAt);
+                        if (!context.mounted) return;
+                        final edited = await EditSaleDialog.show(
+                          context,
+                          saleWithDetails,
+                        );
+                        if (edited == true && context.mounted) {
+                          Navigator.of(context).pop();
+                        }
+                      }
+                      return;
+                    }
+
+                    if (!context.mounted) return;
+                    final edited = await EditSaleDialog.show(
+                      context,
+                      saleWithDetails,
+                    );
+                    if (edited == true && context.mounted) {
+                      Navigator.of(context).pop();
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppTheme.accentRed,
@@ -309,7 +426,7 @@ class SaleDetailSheet extends ConsumerWidget {
                       color: AppTheme.accentRed,
                       width: 1.5,
                     ),
-                    minimumSize: const Size.fromHeight(52),
+                    minimumSize: const Size.fromHeight(50),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -329,8 +446,8 @@ class SaleDetailSheet extends ConsumerWidget {
                       Navigator.of(context).pop();
                     }
                   },
-                )
-              else
+                ),
+              ] else
                 Center(
                   child: Text(
                     'Voided record preserved for historical audit.',

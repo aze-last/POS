@@ -1,4 +1,6 @@
-import 'package:flutter_test/flutter_test.dart';
+// ignore_for_file: deprecated_member_use, depend_on_referenced_packages
+import 'package:test_api/test_api.dart';
+import 'package:matcher/expect.dart';
 import 'package:pos/domain/models/app_version.dart';
 
 void main() {
@@ -45,6 +47,15 @@ void main() {
 
       final v200 = AppVersion.tryParse('v2.0.0')!;
       expect(v200 > v120, isTrue);
+    });
+
+    test('correctly orders build numbers (+BUILD)', () {
+      final v100b2 = AppVersion.tryParse('1.0.0+2')!;
+      final v100b1 = AppVersion.tryParse('1.0.0+1')!;
+      final v100 = AppVersion.tryParse('1.0.0')!;
+      expect(v100b2 > v100b1, isTrue);
+      expect(v100b1 > v100, isTrue);
+      expect(v100 < v100b1, isTrue);
     });
 
     test('evaluates equality and identical versions', () {

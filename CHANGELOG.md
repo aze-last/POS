@@ -1,0 +1,13 @@
+## [v1.0.3] - 2026-11-17
+
+Fix SQLite migration duplicate column error on upgrade and add release-assets to security allowlist
+
+## [v1.0.2] - 2026-11-16
+
+Multi-device Supabase sync (Step 9), product photo upload, and Option A scale keypad
+
+# Changelog
+
+## [v1.0.1] - 2026-11-16
+
+Added edit sale from Sales History with audit trail (sale_edits), capital snapshot preservation, locked day guard and banner, backup v2, and in-app update checker.

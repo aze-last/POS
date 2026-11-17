@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../../domain/models/product_validator.dart';
 import '../database/app_database.dart';
 
 /// Exception thrown when product data violates business rules.
@@ -67,21 +68,20 @@ class ProductRepository {
     required String name,
     required int defaultPriceCentavos,
     required int capitalCentavos,
+    String? imagePath,
   }) async {
+    final nameErr = ProductValidator.validateName(name);
+    if (nameErr != null) throw ProductValidationException(nameErr);
+
+    final priceErr = ProductValidator.validatePriceCentavos(
+      defaultPriceCentavos,
+    );
+    if (priceErr != null) throw ProductValidationException(priceErr);
+
+    final capErr = ProductValidator.validateCapitalCentavos(capitalCentavos);
+    if (capErr != null) throw ProductValidationException(capErr);
+
     final cleanName = name.trim();
-    if (cleanName.isEmpty) {
-      throw const ProductValidationException('Product name cannot be empty');
-    }
-    if (defaultPriceCentavos <= 0) {
-      throw const ProductValidationException(
-        'Price per kg must be greater than 0',
-      );
-    }
-    if (capitalCentavos <= 0) {
-      throw const ProductValidationException(
-        'Capital per kg must be greater than 0',
-      );
-    }
 
     // Name must be unique among ACTIVE products (case-insensitive check)
     final active = await getActiveProducts();
@@ -110,24 +110,11 @@ class ProductRepository {
             capitalCentavos: capitalCentavos,
             sortOrder: Value(nextSortOrder),
             archived: const Value(false),
+            imagePath: Value(imagePath),
           ),
         );
 
     return (await getProductById(id))!;
-  }
-
-  /// Backward-compatible alias for createProduct.
-  Future<int> addProduct({
-    required String name,
-    required int defaultPriceCentavos,
-    required int capitalCentavos,
-  }) async {
-    final product = await createProduct(
-      name: name,
-      defaultPriceCentavos: defaultPriceCentavos,
-      capitalCentavos: capitalCentavos,
-    );
-    return product.id;
   }
 
   /// Updates product details. If capital changes, records an immutable entry in capital_history.
@@ -136,21 +123,21 @@ class ProductRepository {
     required String name,
     required int defaultPriceCentavos,
     required int capitalCentavos,
+    String? imagePath,
+    bool updateImage = false,
   }) async {
+    final nameErr = ProductValidator.validateName(name);
+    if (nameErr != null) throw ProductValidationException(nameErr);
+
+    final priceErr = ProductValidator.validatePriceCentavos(
+      defaultPriceCentavos,
+    );
+    if (priceErr != null) throw ProductValidationException(priceErr);
+
+    final capErr = ProductValidator.validateCapitalCentavos(capitalCentavos);
+    if (capErr != null) throw ProductValidationException(capErr);
+
     final cleanName = name.trim();
-    if (cleanName.isEmpty) {
-      throw const ProductValidationException('Product name cannot be empty');
-    }
-    if (defaultPriceCentavos <= 0) {
-      throw const ProductValidationException(
-        'Price per kg must be greater than 0',
-      );
-    }
-    if (capitalCentavos <= 0) {
-      throw const ProductValidationException(
-        'Capital per kg must be greater than 0',
-      );
-    }
 
     final current = await getProductById(id);
     if (current == null) {
@@ -187,6 +174,7 @@ class ProductRepository {
           name: Value(cleanName),
           defaultPriceCentavos: Value(defaultPriceCentavos),
           capitalCentavos: Value(capitalCentavos),
+          imagePath: updateImage ? Value(imagePath) : const Value.absent(),
         ),
       );
     });
@@ -201,7 +189,7 @@ class ProductRepository {
     );
   }
 
-  /// Restores an archived product to the active catalog.
+  /// Restores an archived product to the active catalog at the end of sort order.
   Future<void> restoreProduct(int id) async {
     final product = await getProductById(id);
     if (product == null) return;
@@ -215,8 +203,19 @@ class ProductRepository {
       );
     }
 
+    final maxSortOrderResult = await _db
+        .customSelect(
+          'SELECT MAX(sort_order) as max_order FROM products WHERE archived = 0',
+        )
+        .getSingleOrNull();
+    final nextSortOrder =
+        (maxSortOrderResult?.data['max_order'] as int? ?? -1) + 1;
+
     await (_db.update(_db.products)..where((p) => p.id.equals(id))).write(
-      const ProductsCompanion(archived: Value(false)),
+      ProductsCompanion(
+        archived: const Value(false),
+        sortOrder: Value(nextSortOrder),
+      ),
     );
   }
 

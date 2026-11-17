@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../data/database/app_database.dart';
 import '../../../data/repositories/sale_repository.dart';
 import '../../../domain/utils/formatters.dart';
 import '../../providers/cart_provider.dart';
@@ -36,10 +37,9 @@ class _CartSheetState extends ConsumerState<CartSheet> {
   void initState() {
     super.initState();
     final cart = ref.read(cartProvider);
-    final chargedPesos =
-        '${cart.chargedCentavos ~/ 100}.${(cart.chargedCentavos % 100).toString().padLeft(2, '0')}';
+    final chargedPesos = formatCentavosToDecimal(cart.chargedCentavos);
     final paidPesos = cart.paidCentavos > 0
-        ? '${cart.paidCentavos ~/ 100}.${(cart.paidCentavos % 100).toString().padLeft(2, '0')}'
+        ? formatCentavosToDecimal(cart.paidCentavos)
         : '';
 
     _chargedController = TextEditingController(text: chargedPesos);
@@ -54,13 +54,11 @@ class _CartSheetState extends ConsumerState<CartSheet> {
   }
 
   void _syncChargedText(int centavos) {
-    _chargedController.text =
-        '${centavos ~/ 100}.${(centavos % 100).toString().padLeft(2, '0')}';
+    _chargedController.text = formatCentavosToDecimal(centavos);
   }
 
   void _syncPaidText(int centavos) {
-    _paidController.text =
-        '${centavos ~/ 100}.${(centavos % 100).toString().padLeft(2, '0')}';
+    _paidController.text = formatCentavosToDecimal(centavos);
     ref.read(cartProvider.notifier).setPaidAmount(centavos);
   }
 
@@ -139,9 +137,13 @@ class _CartSheetState extends ConsumerState<CartSheet> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Current Cart (${cart.totalItemCount})',
-                  style: Theme.of(context).textTheme.titleLarge,
+                Flexible(
+                  child: Text(
+                    'Current Cart (${cart.totalItemCount})',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.close),
@@ -164,75 +166,109 @@ class _CartSheetState extends ConsumerState<CartSheet> {
                         ),
                       ),
                     )
-                  : ListView.separated(
-                      itemCount: cart.lines.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final line = cart.lines[index];
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(
-                            line.productName,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 17,
-                            ),
-                          ),
-                          subtitle: Text(
-                            '${line.weight.formatKg()} @ ${formatMoney(line.pricePerKgCentavos)}/kg',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              color: AppTheme.textSecondary,
-                            ),
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                formatMoney(line.lineValueCentavos),
+                  : Builder(
+                      builder: (context) {
+                        final lineDiscounts = cart.lineDiscountsCentavos;
+                        return ListView.separated(
+                          itemCount: cart.lines.length,
+                          separatorBuilder: (_, _) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final line = cart.lines[index];
+                            final lineDiscount = index < lineDiscounts.length
+                                ? lineDiscounts[index]
+                                : 0;
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(
+                                line.productName,
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 17,
-                                  color: AppTheme.textPrimary,
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.delete_outline,
-                                  color: AppTheme.dangerColor,
-                                ),
-                                onPressed: () {
-                                  ref
-                                      .read(cartProvider.notifier)
-                                      .removeLine(line.id);
-                                  if (cart.lines.length <= 1) {
-                                    _chargedController.text = '0.00';
-                                  } else {
-                                    final newExact =
-                                        cart.exactTotalCentavos -
-                                        line.lineValueCentavos;
-                                    _syncChargedText(newExact);
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${line.weight.formatKg()} @ ${formatMoney(line.pricePerKgCentavos)}/kg',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: AppTheme.textSecondary,
+                                    ),
+                                  ),
+                                  if (lineDiscount > 0)
+                                    Text(
+                                      'Discount: -${formatMoney(lineDiscount)} (Net: ${formatMoney(line.lineValueCentavos - lineDiscount)})',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppTheme.accentGreen,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    formatMoney(line.lineValueCentavos),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 17,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      color: AppTheme.dangerColor,
+                                    ),
+                                    onPressed: () {
+                                      ref
+                                          .read(cartProvider.notifier)
+                                          .removeLine(line.id);
+                                      final remaining = cart.lines
+                                          .where((l) => l.id != line.id)
+                                          .toList();
+                                      final newExact = remaining.fold<int>(
+                                        0,
+                                        (sum, l) => sum + l.lineValueCentavos,
+                                      );
+                                      _syncChargedText(newExact);
+                                    },
+                                  ),
+                                ],
+                              ),
+                              onTap: () async {
+                                // Tap to edit line (with archived fallback)
+                                final products = await ref
+                                    .read(productRepositoryProvider)
+                                    .getActiveProducts();
+                                Product? prod;
+                                for (final p in products) {
+                                  if (p.id == line.productId) {
+                                    prod = p;
+                                    break;
                                   }
-                                },
-                              ),
-                            ],
-                          ),
-                          onTap: () async {
-                            // Tap to edit line
-                            final products = await ref
-                                .read(productRepositoryProvider)
-                                .getActiveProducts();
-                            final prod = products.firstWhere(
-                              (p) => p.id == line.productId,
+                                }
+                                prod ??= Product(
+                                  id: line.productId,
+                                  name: line.productName,
+                                  defaultPriceCentavos: line.pricePerKgCentavos,
+                                  capitalCentavos: line.capitalPerKgCentavos,
+                                  sortOrder: 0,
+                                  archived: true,
+                                );
+                                if (context.mounted) {
+                                  WeighingBottomSheet.show(
+                                    context,
+                                    product: prod,
+                                    lineToEdit: line,
+                                  );
+                                }
+                              },
                             );
-                            if (context.mounted) {
-                              WeighingBottomSheet.show(
-                                context,
-                                product: prod,
-                                lineToEdit: line,
-                              );
-                            }
                           },
                         );
                       },

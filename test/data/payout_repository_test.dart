@@ -46,12 +46,34 @@ void main() {
         reserveCentavos: 105000,
       );
 
+      // Attempting to overwrite a locked payout without unlocking throws StateError
+      await expectLater(
+        repository.saveAndLockPayout(
+          date: today,
+          toParentsCentavos: 300000,
+          salaryCentavos: 50000,
+          reserveCentavos: 100000,
+        ),
+        throwsA(isA<StateError>()),
+      );
+
       await repository.unlockDay(today);
       final isLocked = await repository.isDayLocked(today);
       expect(isLocked, isFalse);
 
       final payout = await repository.getPayoutForDay(today);
       expect(payout!.locked, isFalse);
+
+      // Now it can be saved again after unlock
+      await repository.saveAndLockPayout(
+        date: today,
+        toParentsCentavos: 360000,
+        salaryCentavos: 40000,
+        reserveCentavos: 100000,
+      );
+      final updated = await repository.getPayoutForDay(today);
+      expect(updated!.toParentsCentavos, 360000);
+      expect(updated.locked, isTrue);
     });
 
     test('reads and updates settings', () async {

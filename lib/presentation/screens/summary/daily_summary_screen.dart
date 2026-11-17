@@ -69,7 +69,9 @@ class DailySummaryScreen extends ConsumerWidget {
                             child: _KpiCard(
                               label: 'TOTAL CHARGED',
                               value: formatMoney(summary.totalChargedCentavos),
-                              subtitle: '${summary.salesCount} sales completed',
+                              subtitle: summary.totalDiscountsCentavos > 0
+                                  ? '${summary.salesCount} sales (${formatMoney(summary.totalDiscountsCentavos)} discounts)'
+                                  : '${summary.salesCount} sales completed',
                               valueColor: AppTheme.primaryDark,
                             ),
                           ),
@@ -87,6 +89,88 @@ class DailySummaryScreen extends ConsumerWidget {
                           ),
                         ],
                       ),
+                      if (summary.editedSalesCount > 0) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.blue.shade200),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.edit_note,
+                                size: 16,
+                                color: Colors.blue.shade800,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                '${summary.editedSalesCount} ${summary.editedSalesCount == 1 ? 'sale' : 'sales'} edited today',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.blue.shade900,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      if (summary.showReopenedEditBanner) ...[
+                        const SizedBox(height: 12),
+                        _ReopenedPayoutBanner(summary: summary),
+                      ],
+                      if (summary.totalDiscountsCentavos > 0) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade50,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.orange.shade200),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Row(
+                                children: [
+                                  Icon(
+                                    Icons.local_offer_outlined,
+                                    size: 16,
+                                    color: Colors.deepOrange,
+                                  ),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    'Total Discounts Given',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.brown,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Text(
+                                '-${formatMoney(summary.totalDiscountsCentavos)}',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.deepOrange,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
 
                       // Produce Sold by Variety Card
@@ -327,6 +411,136 @@ class _KpiCard extends StatelessWidget {
           Text(
             subtitle,
             style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReopenedPayoutBanner extends StatelessWidget {
+  final DailySummaryState summary;
+
+  const _ReopenedPayoutBanner({required this.summary});
+
+  @override
+  Widget build(BuildContext context) {
+    final payout = summary.payout;
+    if (payout == null) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.warningAmber.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.warningAmber, width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.warning_amber_rounded,
+                color: AppTheme.warningAmber,
+                size: 22,
+              ),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Sales changed since this day was paid out. Review the payout before marking it again.',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Divider(color: Colors.amber.shade300, height: 1),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'PREVIOUSLY SAVED',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Parents: ${formatMoney(payout.toParentsCentavos)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      'Salary: ${formatMoney(payout.salaryCentavos)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      'Reserve: ${formatMoney(payout.reserveCentavos)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'NEW SUGGESTED',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primaryDark,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Parents: ${formatMoney(summary.calculation.suggestedToParentsCentavos)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primaryDark,
+                      ),
+                    ),
+                    Text(
+                      'Salary: ${formatMoney(summary.calculation.suggestedSalaryCentavos)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primaryDark,
+                      ),
+                    ),
+                    Text(
+                      'Reserve: ${formatMoney(summary.calculation.reserveCentavos)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primaryDark,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),

@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -167,5 +168,79 @@ void main() {
 
       await cleanUpWidget(tester);
     });
+
+    testWidgets(
+      'displays edited sales count and reopened payout warning banner with saved vs suggested amounts',
+      (tester) async {
+        final now = DateTime.now();
+
+        final saleResult = await saleRepo.completeSale(
+          lines: [
+            SaleLineInput(
+              productId: 1,
+              productName: 'Cardava',
+              weight: Weight.fromGrams(1000),
+              pricePerKgCentavos: 3000,
+              capitalPerKgCentavos: 1800,
+            ),
+          ],
+          chargedCentavos: 3000,
+          paidCentavos: 3000,
+          createdAt: now,
+        );
+
+        // Lock the day with initial payout
+        await db
+            .into(db.payouts)
+            .insert(
+              PayoutsCompanion.insert(
+                date: DateTime(now.year, now.month, now.day),
+                toParentsCentavos: 1800,
+                salaryCentavos: 600,
+                reserveCentavos: 600,
+                locked: const Value(true),
+              ),
+            );
+
+        // Reopen the day
+        await saleRepo.reopenDay(now);
+
+        // Edit the sale (e.g. increase weight to 2000g, charged 5000)
+        await saleRepo.editSale(
+          saleId: saleResult.sale.id,
+          newLines: [
+            SaleLineInput(
+              originalItemId: saleResult.items.single.id,
+              productId: 1,
+              productName: 'Cardava',
+              weight: Weight.fromGrams(2000),
+              pricePerKgCentavos: 2500,
+              capitalPerKgCentavos: 1800,
+            ),
+          ],
+          chargedCentavos: 5000,
+          paidCentavos: 5000,
+          reason: 'Customer added 1kg',
+        );
+
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pumpAndSettle();
+
+        // Verify "1 sale edited today" counter is displayed
+        expect(find.text('1 sale edited today'), findsOneWidget);
+
+        // Verify reopened payout banner is displayed
+        expect(
+          find.text(
+            'Sales changed since this day was paid out. Review the payout before marking it again.',
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('PREVIOUSLY SAVED'), findsOneWidget);
+        expect(find.text('NEW SUGGESTED'), findsOneWidget);
+
+        await cleanUpWidget(tester);
+      },
+    );
   });
 }

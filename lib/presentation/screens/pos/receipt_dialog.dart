@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../data/repositories/sale_repository.dart';
+import '../../../domain/services/pricing_calculator.dart';
 import '../../../domain/utils/formatters.dart';
 import '../../theme/app_theme.dart';
 
@@ -63,33 +64,70 @@ class ReceiptDialog extends StatelessWidget {
                 ),
               ),
               const Divider(height: 24),
-              // Itemized list
-              ...items.map((item) {
-                final lineVal =
-                    (item.pricePerKgCentavos * item.grams + 500) ~/ 1000;
-                final kgStr = (item.grams / 1000).toStringAsFixed(3);
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 8.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${item.productNameSnapshot} (${kgStr}kg @ ${formatMoney(item.pricePerKgCentavos)})',
-                          style: const TextStyle(fontSize: 15),
+              // Itemized list with largest-remainder discount allocation
+              Builder(
+                builder: (context) {
+                  final itemValues = items
+                      .map(
+                        (i) => PricingCalculator.computeLineValue(
+                          grams: i.grams,
+                          pricePerKgCentavos: i.pricePerKgCentavos,
                         ),
-                      ),
-                      Text(
-                        formatMoney(lineVal),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
+                      )
+                      .toList();
+                  final allocatedDiscounts = result.discountCentavos > 0
+                      ? PricingCalculator.allocateDiscount(
+                          lineValuesCentavos: itemValues,
+                          totalDiscountCentavos: result.discountCentavos,
+                        )
+                      : List<int>.filled(items.length, 0);
+
+                  return Column(
+                    children: List.generate(items.length, (idx) {
+                      final item = items[idx];
+                      final lineVal = itemValues[idx];
+                      final weightStr = formatWeight(item.grams);
+                      final disc = allocatedDiscounts[idx];
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${item.productNameSnapshot} ($weightStr @ ${formatMoney(item.pricePerKgCentavos)}/kg)',
+                                    style: const TextStyle(fontSize: 15),
+                                  ),
+                                  if (disc > 0)
+                                    Text(
+                                      'Line Discount: -${formatMoney(disc)}',
+                                      style: const TextStyle(
+                                        color: Colors.green,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              formatMoney(lineVal),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
-                  ),
-                );
-              }),
+                      );
+                    }),
+                  );
+                },
+              ),
               const Divider(height: 24),
               // Exact Total
               Row(
@@ -130,15 +168,27 @@ class ReceiptDialog extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Amount Charged:',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  const Flexible(
+                    child: Text(
+                      'Amount Charged:',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
-                  Text(
-                    formatMoney(sale.chargedCentavos),
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
+                  Flexible(
+                    child: Text(
+                      formatMoney(sale.chargedCentavos),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -148,12 +198,24 @@ class ReceiptDialog extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Amount Paid:', style: TextStyle(fontSize: 15)),
-                  Text(
-                    formatMoney(sale.paidCentavos),
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                  const Flexible(
+                    child: Text(
+                      'Amount Paid:',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 15),
+                    ),
+                  ),
+                  Flexible(
+                    child: Text(
+                      formatMoney(sale.paidCentavos),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -170,20 +232,29 @@ class ReceiptDialog extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'CHANGE DUE',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: Colors.green,
+                    const Flexible(
+                      child: Text(
+                        'CHANGE DUE',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.green,
+                        ),
                       ),
                     ),
-                    Text(
-                      formatMoney(sale.changeCentavos),
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green.shade800,
+                    Flexible(
+                      child: Text(
+                        formatMoney(sale.changeCentavos),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.end,
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green.shade800,
+                        ),
                       ),
                     ),
                   ],

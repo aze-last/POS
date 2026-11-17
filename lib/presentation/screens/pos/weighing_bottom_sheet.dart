@@ -5,38 +5,47 @@ import '../../../data/database/app_database.dart';
 import '../../../domain/models/weight.dart';
 import '../../../domain/services/pricing_calculator.dart';
 import '../../../domain/utils/formatters.dart';
+import '../../../domain/utils/weight_parser.dart';
 import '../../providers/cart_provider.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/product_image_widget.dart';
+import '../../widgets/stall_keypad.dart';
 
 /// Modal bottom sheet for entering weight and confirming line price.
 ///
 /// Features:
-/// - Discrete kg and g numeric inputs (0-999 for g, total > 0)
-/// - One-tap quick weight shortcut chips (+0.5kg, +1.0kg, +2.0kg)
+/// - Scale-style single-stream weight input with on-screen stall keypad
+/// - Quick one-tap shortcut chips (+0.5kg, +1.0kg, +2.0kg, Clear)
 /// - Price/kg prefilled with product default, editable for this sale only
 /// - Live calculated line total
 /// - Parsed confirmation preview ("1.300 kg @ P25.00/kg = P32.50")
 class WeighingBottomSheet extends ConsumerStatefulWidget {
   final Product product;
   final CartLine? lineToEdit;
+  final void Function(Weight weight, int pricePerKgCentavos)? onCustomConfirm;
 
   const WeighingBottomSheet({
     super.key,
     required this.product,
     this.lineToEdit,
+    this.onCustomConfirm,
   });
 
   static Future<void> show(
     BuildContext context, {
     required Product product,
     CartLine? lineToEdit,
+    void Function(Weight weight, int pricePerKgCentavos)? onCustomConfirm,
   }) {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) =>
-          WeighingBottomSheet(product: product, lineToEdit: lineToEdit),
+      builder: (ctx) => WeighingBottomSheet(
+        product: product,
+        lineToEdit: lineToEdit,
+        onCustomConfirm: onCustomConfirm,
+      ),
     );
   }
 
@@ -46,8 +55,8 @@ class WeighingBottomSheet extends ConsumerStatefulWidget {
 }
 
 class _WeighingBottomSheetState extends ConsumerState<WeighingBottomSheet> {
-  late final TextEditingController _kgController;
-  late final TextEditingController _gController;
+  late String _weightInput;
+  bool _isFirstInput = true;
   late final TextEditingController _priceController;
 
   bool get isEditing => widget.lineToEdit != null;
@@ -56,10 +65,17 @@ class _WeighingBottomSheetState extends ConsumerState<WeighingBottomSheet> {
   void initState() {
     super.initState();
     final line = widget.lineToEdit;
-    final initialKg = line != null ? line.weight.kg.toString() : '1';
-    final initialG = line != null
-        ? line.weight.g.toString().padLeft(3, '0')
-        : '000';
+    if (line != null) {
+      final kg = line.weight.kg;
+      final g = line.weight.g;
+      if (g == 0) {
+        _weightInput = '$kg.0';
+      } else {
+        _weightInput = '$kg.${g.toString().padLeft(3, '0')}';
+      }
+    } else {
+      _weightInput = '1.0';
+    }
 
     final priceCentavos = line != null
         ? line.pricePerKgCentavos
@@ -67,24 +83,17 @@ class _WeighingBottomSheetState extends ConsumerState<WeighingBottomSheet> {
     final pricePesos =
         '${priceCentavos ~/ 100}.${(priceCentavos % 100).toString().padLeft(2, '0')}';
 
-    _kgController = TextEditingController(text: initialKg);
-    _gController = TextEditingController(text: initialG);
     _priceController = TextEditingController(text: pricePesos);
   }
 
   @override
   void dispose() {
-    _kgController.dispose();
-    _gController.dispose();
     _priceController.dispose();
     super.dispose();
   }
 
   int get _parsedGrams {
-    final kg = int.tryParse(_kgController.text.trim()) ?? 0;
-    final g = int.tryParse(_gController.text.trim()) ?? 0;
-    if (kg < 0 || g < 0 || g > 999) return 0;
-    return kg * 1000 + g;
+    return parseWeightStringToGrams(_weightInput);
   }
 
   int get _parsedPriceCentavos {
@@ -101,19 +110,77 @@ class _WeighingBottomSheetState extends ConsumerState<WeighingBottomSheet> {
     );
   }
 
+  void _onDigit(String digit) {
+    setState(() {
+      if (_isFirstInput) {
+        _weightInput = digit;
+        _isFirstInput = false;
+        return;
+      }
+      if (_weightInput == '0') {
+        _weightInput = digit;
+        return;
+      }
+      if (_weightInput.contains('.')) {
+        final frac = _weightInput.split('.')[1];
+        if (frac.length >= 3) return; // Limit to 3 decimal places (grams)
+      }
+      if (_weightInput.length >= 7) return;
+
+      _weightInput += digit;
+    });
+  }
+
+  void _onDot() {
+    setState(() {
+      if (_isFirstInput) {
+        _weightInput = '0.';
+        _isFirstInput = false;
+        return;
+      }
+      if (_weightInput.isEmpty) {
+        _weightInput = '0.';
+      } else if (!_weightInput.contains('.')) {
+        _weightInput += '.';
+      }
+    });
+  }
+
+  void _onBackspace() {
+    setState(() {
+      if (_isFirstInput) {
+        _weightInput = '0';
+        _isFirstInput = false;
+        return;
+      }
+      if (_weightInput.isNotEmpty) {
+        _weightInput = _weightInput.substring(0, _weightInput.length - 1);
+        if (_weightInput.isEmpty) {
+          _weightInput = '0';
+        }
+      }
+    });
+  }
+
   void _addQuickWeight(int addGrams) {
     final current = _parsedGrams;
     final updated = current + addGrams;
+    final kg = updated ~/ 1000;
+    final g = updated % 1000;
     setState(() {
-      _kgController.text = (updated ~/ 1000).toString();
-      _gController.text = (updated % 1000).toString().padLeft(3, '0');
+      _isFirstInput = false;
+      if (g == 0) {
+        _weightInput = '$kg.0';
+      } else {
+        _weightInput = '$kg.${g.toString().padLeft(3, '0')}';
+      }
     });
   }
 
   void _clearWeight() {
     setState(() {
-      _kgController.text = '0';
-      _gController.text = '000';
+      _weightInput = '0';
+      _isFirstInput = false;
     });
   }
 
@@ -124,6 +191,13 @@ class _WeighingBottomSheetState extends ConsumerState<WeighingBottomSheet> {
     if (grams <= 0 || price <= 0) return;
 
     final weight = Weight.fromGrams(grams);
+
+    if (widget.onCustomConfirm != null) {
+      widget.onCustomConfirm!(weight, price);
+      Navigator.of(context).pop();
+      return;
+    }
+
     final notifier = ref.read(cartProvider.notifier);
 
     if (isEditing) {
@@ -174,8 +248,14 @@ class _WeighingBottomSheetState extends ConsumerState<WeighingBottomSheet> {
               ),
             ),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+                ProductImageWidget(
+                  imagePath: widget.product.imagePath,
+                  width: 52,
+                  height: 52,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -206,58 +286,45 @@ class _WeighingBottomSheetState extends ConsumerState<WeighingBottomSheet> {
             ),
             const Divider(height: 20),
 
-            // Two-Field Weight Input (kg & g)
+            // Weight Header
             const Text(
               'Enter Weight (kg and grams):',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
             ),
             const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: TextFormField(
-                    controller: _kgController,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(
-                      fontSize: 22,
+
+            // Large Stall Weight Display
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber.shade300, width: 1.5),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    formatWeight(grams),
+                    style: TextStyle(
+                      fontSize: 34,
                       fontWeight: FontWeight.bold,
+                      color: Colors.amber.shade900,
+                      letterSpacing: 0.5,
                     ),
-                    decoration: const InputDecoration(
-                      labelText: 'Kilograms (kg)',
-                      border: OutlineInputBorder(),
-                      suffixText: 'kg',
-                    ),
-                    onChanged: (_) => setState(() {}),
                   ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 10),
-                  child: Text(
-                    '.',
-                    style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                Expanded(
-                  flex: 3,
-                  child: TextFormField(
-                    controller: _gController,
-                    keyboardType: TextInputType.number,
+                  const SizedBox(height: 2),
+                  Text(
+                    grams > 0 ? '($grams grams)' : '(Enter weight)',
                     style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textSecondary,
                     ),
-                    decoration: const InputDecoration(
-                      labelText: 'Grams (g: 0-999)',
-                      border: OutlineInputBorder(),
-                      suffixText: 'g',
-                    ),
-                    onChanged: (_) => setState(() {}),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
 
             // Quick weight chips for 1-tap stall convenience
             Wrap(
@@ -283,7 +350,16 @@ class _WeighingBottomSheetState extends ConsumerState<WeighingBottomSheet> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
+
+            // Large On-Screen Stall Keypad (Option A)
+            StallKeypad(
+              onDigit: _onDigit,
+              onDot: _onDot,
+              onBackspace: _onBackspace,
+              onClear: _clearWeight,
+            ),
+            const SizedBox(height: 14),
 
             // Price/kg (prefilled with default, editable FOR THIS SALE ONLY)
             TextFormField(
@@ -299,11 +375,12 @@ class _WeighingBottomSheetState extends ConsumerState<WeighingBottomSheet> {
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
                 ),
+                isDense: true,
                 helperText: 'Changing this does not modify the catalog price.',
               ),
               onChanged: (_) => setState(() {}),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
 
             // Parsed Confirmation & Live Total Card
             Container(
@@ -316,27 +393,30 @@ class _WeighingBottomSheetState extends ConsumerState<WeighingBottomSheet> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Calculated Line Total:',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: AppTheme.textSecondary,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Calculated Line Total:',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppTheme.textSecondary,
+                          ),
                         ),
-                      ),
-                      Text(
-                        grams > 0
-                            ? '${(grams / 1000).toStringAsFixed(3)} kg @ ${formatMoney(_parsedPriceCentavos)}/kg'
-                            : 'Enter weight to calculate',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
+                        Text(
+                          grams > 0
+                              ? '${formatWeight(grams)} @ ${formatMoney(_parsedPriceCentavos)}/kg'
+                              : 'Enter weight to calculate',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 8),
                   Text(
                     formatMoney(lineValue),
                     style: TextStyle(
@@ -348,7 +428,7 @@ class _WeighingBottomSheetState extends ConsumerState<WeighingBottomSheet> {
                 ],
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
 
             // Confirm Button (54dp height)
             ElevatedButton(

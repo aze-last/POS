@@ -1,10 +1,6 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
+import '../../data/services/cart_draft_service.dart';
 import '../../domain/models/weight.dart';
 import '../../domain/services/pricing_calculator.dart';
 import '../../domain/utils/formatters.dart';
@@ -90,6 +86,18 @@ class CartState {
       ? exactTotalCentavos - chargedCentavos
       : 0;
 
+  /// Allocates total discount across lines proportional to their line values
+  /// using the largest-remainder method (Hare-Niemeyer).
+  List<int> get lineDiscountsCentavos {
+    if (discountCentavos <= 0 || lines.isEmpty) {
+      return List<int>.filled(lines.length, 0);
+    }
+    return PricingCalculator.allocateDiscount(
+      lineValuesCentavos: lines.map((l) => l.lineValueCentavos).toList(),
+      totalDiscountCentavos: discountCentavos,
+    );
+  }
+
   int get changeCentavos =>
       paidCentavos >= chargedCentavos ? paidCentavos - chargedCentavos : 0;
 
@@ -113,71 +121,40 @@ class CartState {
   }
 }
 
-/// Persistence handler for draft cart across app backgrounding / restarts.
-class DraftCartStorage {
-  Future<File?> _getFile() async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      return File(p.join(dir.path, 'draft_cart.json'));
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> saveDraft(List<CartLine> lines) async {
-    try {
-      final file = await _getFile();
-      if (file == null) return;
-      if (lines.isEmpty) {
-        if (await file.exists()) await file.delete();
-        return;
-      }
-      final jsonList = lines.map((l) => l.toJson()).toList();
-      await file.writeAsString(jsonEncode(jsonList));
-    } catch (_) {}
-  }
-
-  Future<List<CartLine>> loadDraft() async {
-    try {
-      final file = await _getFile();
-      if (file == null || !await file.exists()) return [];
-      final content = await file.readAsString();
-      final decoded = jsonDecode(content) as List<dynamic>;
-      return decoded
-          .map((item) => CartLine.fromJson(item as Map<String, dynamic>))
-          .toList();
-    } catch (_) {
-      return [];
-    }
-  }
-}
-
-final draftCartStorageProvider = Provider<DraftCartStorage>(
-  (ref) => DraftCartStorage(),
+final cartDraftServiceProvider = Provider<CartDraftService>(
+  (ref) => CartDraftService(),
 );
 
 /// Notifier managing active cart state and checkout math.
 class CartNotifier extends Notifier<CartState> {
-  late final DraftCartStorage _storage;
+  late final CartDraftService _draftService;
+  bool _isDraftLoaded = false;
 
   @override
   CartState build() {
-    _storage = ref.watch(draftCartStorageProvider);
+    _draftService = ref.watch(cartDraftServiceProvider);
     _loadInitialDraft();
     return const CartState();
   }
 
   Future<void> _loadInitialDraft() async {
-    final draftLines = await _storage.loadDraft();
-    if (draftLines.isNotEmpty) {
+    final draftData = await _draftService.loadDraft();
+    if (draftData.isNotEmpty) {
+      final draftLines = draftData.map(CartLine.fromJson).toList();
       state = state.copyWith(lines: draftLines);
     }
+    _isDraftLoaded = true;
+  }
+
+  void _persistDraft(List<CartLine> lines) {
+    if (!_isDraftLoaded) return;
+    _draftService.saveDraft(lines.map((l) => l.toJson()).toList());
   }
 
   void addLine(CartLine line) {
     final updated = [...state.lines, line];
     state = state.copyWith(lines: updated);
-    _storage.saveDraft(updated);
+    _persistDraft(updated);
   }
 
   void updateLine(String id, Weight newWeight, int newPricePerKgCentavos) {
@@ -192,13 +169,14 @@ class CartNotifier extends Notifier<CartState> {
     }).toList();
 
     state = state.copyWith(lines: updated);
-    _storage.saveDraft(updated);
+    _persistDraft(updated);
   }
 
   void removeLine(String id) {
     final updated = state.lines.where((l) => l.id != id).toList();
-    state = state.copyWith(lines: updated);
-    _storage.saveDraft(updated);
+    // Reset manual override on removal to prevent stale charged amount
+    state = state.copyWith(lines: updated, manualChargedCentavos: () => null);
+    _persistDraft(updated);
   }
 
   void setChargedAmount(int? centavos) {
@@ -225,7 +203,7 @@ class CartNotifier extends Notifier<CartState> {
 
   void clearCart() {
     state = const CartState();
-    _storage.saveDraft([]);
+    _persistDraft([]);
   }
 }
 

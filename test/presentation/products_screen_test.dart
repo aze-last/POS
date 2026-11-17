@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pos/data/database/app_database.dart';
 import 'package:pos/presentation/providers/database_provider.dart';
 import 'package:pos/presentation/screens/products/products_screen.dart';
+import 'package:pos/presentation/widgets/product_image_widget.dart';
 
 void main() {
   late AppDatabase db;
@@ -43,10 +44,11 @@ void main() {
       expect(find.text('Active (6)'), findsOneWidget);
       expect(find.text('Archived (0)'), findsOneWidget);
 
-      // Verify starter products rendered
+      // Verify starter products rendered with image widget
       expect(find.text('Cardava'), findsOneWidget);
       expect(find.text('Binanggay'), findsOneWidget);
       expect(find.text('Tundan'), findsOneWidget);
+      expect(find.byType(ProductImageWidget), findsWidgets);
 
       // Verify prominent capital display
       expect(find.text('Capital: P20.00/kg'), findsWidgets); // Cardava capital
@@ -122,6 +124,85 @@ void main() {
         ),
         findsOneWidget,
       );
+
+      await cleanUpWidget(tester);
+    });
+
+    testWidgets('adds a new product variety through FAB', (tester) async {
+      await tester.pumpWidget(buildTestWidget());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Active (6)'), findsOneWidget);
+
+      // Tap Add Variety FAB
+      final fab = find.widgetWithText(FloatingActionButton, 'Add Variety');
+      expect(fab, findsOneWidget);
+      await tester.tap(fab);
+      await tester.pumpAndSettle();
+
+      // Form should be visible
+      expect(find.text('Add Banana Variety'), findsOneWidget);
+
+      // Enter name, price, capital
+      final textFields = find.byType(TextFormField);
+      expect(textFields, findsNWidgets(3));
+
+      await tester.enterText(textFields.at(0), 'Latundan Special');
+      await tester.enterText(textFields.at(1), '45.00');
+      await tester.enterText(textFields.at(2), '30.00');
+      await tester.pumpAndSettle();
+
+      // Tap Save
+      final saveBtn = find.widgetWithText(ElevatedButton, 'Add to Catalog');
+      await tester.tap(saveBtn);
+      await tester.pumpAndSettle();
+
+      // Verify new variety count updated and scroll to see it
+      expect(find.text('Active (7)'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Latundan Special'), 100);
+      expect(find.text('Latundan Special'), findsOneWidget);
+
+      await cleanUpWidget(tester);
+    });
+
+    testWidgets('edits an existing product variety', (tester) async {
+      await tester.pumpWidget(buildTestWidget());
+      await tester.pumpAndSettle();
+
+      // Tap Cardava row to edit
+      await tester.tap(find.text('Cardava'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Edit Banana Variety'), findsOneWidget);
+
+      final textFields = find.byType(TextFormField);
+      // Change price to 35.00
+      await tester.enterText(textFields.at(1), '35.00');
+      await tester.pumpAndSettle();
+
+      final saveBtn = find.widgetWithText(ElevatedButton, 'Save Changes');
+      await tester.tap(saveBtn);
+      await tester.pumpAndSettle();
+
+      // Verify updated price in list
+      expect(find.text('Sell: P35.00/kg'), findsWidgets);
+
+      await cleanUpWidget(tester);
+    });
+
+    testWidgets('reorders active products via drag and drop', (tester) async {
+      await tester.pumpWidget(buildTestWidget());
+      await tester.pumpAndSettle();
+
+      final dragHandles = find.byIcon(Icons.drag_indicator);
+      expect(dragHandles, findsWidgets);
+
+      // Drag first item below second item
+      final firstHandle = dragHandles.first;
+      await tester.drag(firstHandle, const Offset(0, 100));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Active (6)'), findsOneWidget);
 
       await cleanUpWidget(tester);
     });

@@ -16,12 +16,29 @@ if (!(Test-Path "pubspec.yaml")) {
     Write-Error "pubspec.yaml not found. Please run this script from the project root directory."
 }
 
-# 2. Check keystore configuration
+# 2. Check keystore configuration and keystore file
 if (!(Test-Path "android/key.properties")) {
     Write-Error "android/key.properties is missing! Release builds require a configured release keystore. See AGENTS.md for setup instructions."
 }
+$keyProps = Get-Content "android/key.properties" -Raw
+if ($keyProps -match 'storeFile\s*=\s*(.+)') {
+    $storePath = $Matches[1].Trim()
+    $fullStorePath = Join-Path "android" $storePath
+    if (!(Test-Path $fullStorePath) -and !(Test-Path $storePath)) {
+        Write-Error "Keystore file '$storePath' referenced in android/key.properties not found! Per AGENTS.md §7, restore release.keystore."
+    }
+} else {
+    Write-Error "storeFile property missing in android/key.properties."
+}
 
-# 3. Read current version from pubspec.yaml
+# 3. Run test suite BEFORE touching pubspec.yaml or CHANGELOG.md (p7-15)
+Write-Host "Running tests prior to release bump..." -ForegroundColor Cyan
+flutter test
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Tests failed! Aborting release without bumping version."
+}
+
+# 4. Read current version from pubspec.yaml
 $pubspecContent = Get-Content "pubspec.yaml" -Raw
 if ($pubspecContent -notmatch 'version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)') {
     Write-Error "Could not parse version: MAJOR.MINOR.PATCH+BUILD from pubspec.yaml"
@@ -48,11 +65,11 @@ $tag = "v$newVersionName"
 
 Write-Host "Bumping version: $oldVersion -> $newVersion (Tag: $tag)" -ForegroundColor Yellow
 
-# 4. Update pubspec.yaml
+# 5. Update pubspec.yaml
 $updatedPubspec = $pubspecContent -replace 'version:\s*\d+\.\d+\.\d+\+\d+', "version: $newVersion"
 [System.IO.File]::WriteAllText("$PWD/pubspec.yaml", $updatedPubspec)
 
-# 5. Update CHANGELOG.md
+# 6. Update CHANGELOG.md
 $dateStr = Get-Date -Format "yyyy-MM-dd"
 $changelogEntry = @"
 ## [$tag] - $dateStr
@@ -69,16 +86,13 @@ if (Test-Path "CHANGELOG.md") {
     [System.IO.File]::WriteAllText("$PWD/CHANGELOG.md", "# Changelog`n`n" + $changelogEntry)
 }
 
-# 6. Run test suite
-Write-Host "Running tests..." -ForegroundColor Cyan
-flutter test
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Tests failed! Aborting release."
-}
-
 # 7. Build signed release APK
 Write-Host "Building release APK..." -ForegroundColor Cyan
-flutter build apk --release
+if (Test-Path ".env") {
+    flutter build apk --release --dart-define-from-file=.env
+} else {
+    flutter build apk --release
+}
 if ($LASTEXITCODE -ne 0) {
     Write-Error "flutter build apk --release failed! Aborting release."
 }

@@ -5,6 +5,7 @@ import '../../../data/database/app_database.dart';
 import '../../../domain/utils/formatters.dart';
 import '../../providers/product_providers.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/product_image_widget.dart';
 import 'capital_history_sheet.dart';
 import 'product_form_dialog.dart';
 
@@ -61,7 +62,20 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
           content: Text('${product.name} archived'),
           action: SnackBarAction(
             label: 'Undo',
-            onPressed: () => repo.restoreProduct(product.id),
+            onPressed: () async {
+              try {
+                await repo.restoreProduct(product.id);
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      backgroundColor: AppTheme.dangerColor,
+                      content: Text('Could not restore: $e'),
+                    ),
+                  );
+                }
+              }
+            },
           ),
         ),
       );
@@ -240,13 +254,27 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
                   padding: const EdgeInsets.all(14.0),
                   child: Row(
                     children: [
-                      // Drag handle icon
-                      const ReorderableDragStartListener(
-                        index: 0,
-                        child: Icon(
-                          Icons.drag_indicator,
-                          color: AppTheme.borderSubtle,
+                      // Drag handle icon (min 48dp hit area)
+                      ReorderableDragStartListener(
+                        index: index,
+                        child: Container(
+                          width: 48,
+                          height: 48,
+                          alignment: Alignment.center,
+                          child: const Icon(
+                            Icons.drag_indicator,
+                            size: 26,
+                            color: AppTheme.borderSubtle,
+                          ),
                         ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Product Photo
+                      ProductImageWidget(
+                        imagePath: product.imagePath,
+                        width: 48,
+                        height: 48,
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       const SizedBox(width: 12),
                       // Product Info
@@ -353,6 +381,12 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
               margin: const EdgeInsets.only(bottom: 10),
               color: Colors.grey.shade100,
               child: ListTile(
+                leading: ProductImageWidget(
+                  imagePath: product.imagePath,
+                  width: 44,
+                  height: 44,
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 title: Text(
                   product.name,
                   style: const TextStyle(

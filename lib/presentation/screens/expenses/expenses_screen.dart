@@ -23,6 +23,9 @@ class ExpensesScreen extends ConsumerWidget {
     final summaryAsync = ref.watch(expenseSummaryForDayProvider(selectedDate));
     final isLockedAsync = ref.watch(payoutForDayProvider(selectedDate));
     final isLocked = isLockedAsync.value?.locked ?? false;
+    final dailySummaryAsync = ref.watch(
+      dailySummaryStateProvider(selectedDate),
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -54,12 +57,13 @@ class ExpensesScreen extends ConsumerWidget {
                 ref.read(selectedExpensesDateProvider.notifier).setDate(d),
           ),
 
-          // Summary banner
+          // Summary banner with Salary Tracker
           summaryAsync.when(
             data: (summary) => _ExpensesSummaryHeader(
               spoilageCentavos: summary.spoilageCentavos,
               otherExpensesCentavos: summary.otherExpensesCentavos,
               isLocked: isLocked,
+              dailySummary: dailySummaryAsync.value,
             ),
             loading: () => const LinearProgressIndicator(),
             error: (e, _) => const SizedBox.shrink(),
@@ -230,16 +234,47 @@ class _ExpensesSummaryHeader extends StatelessWidget {
   final int spoilageCentavos;
   final int otherExpensesCentavos;
   final bool isLocked;
+  final DailySummaryState? dailySummary;
 
   const _ExpensesSummaryHeader({
     required this.spoilageCentavos,
     required this.otherExpensesCentavos,
     required this.isLocked,
+    this.dailySummary,
   });
 
   @override
   Widget build(BuildContext context) {
-    final total = spoilageCentavos + otherExpensesCentavos;
+    final totalExpenses = spoilageCentavos + otherExpensesCentavos;
+
+    // Daily Salary calculations
+    final calc = dailySummary?.calculation;
+    final settings = dailySummary?.settings;
+    final isPercent = settings?.salaryMode == 'percent';
+    final targetSalary = isPercent
+        ? (calc != null && calc.grossProfitCentavos > 0 && settings != null
+              ? ((calc.grossProfitCentavos *
+                            settings.salaryPercentBasisPoints) +
+                        5000) ~/
+                    10000
+              : 0)
+        : (settings?.fixedDailySalaryCentavos ?? 0);
+
+    final currentSalary =
+        calc?.actualSalaryCentavos ?? calc?.suggestedSalaryCentavos ?? 0;
+    final isSalaryCapped = calc?.isSalaryCapped ?? false;
+    final hasSales = (dailySummary?.salesCount ?? 0) > 0;
+    final isZeroSalary = currentSalary <= 0;
+
+    // Color indicator for remaining salary
+    final Color salaryColor;
+    if (isZeroSalary && (hasSales || totalExpenses > 0)) {
+      salaryColor = AppTheme.accentRed;
+    } else if (isSalaryCapped) {
+      salaryColor = AppTheme.warningAmber;
+    } else {
+      salaryColor = AppTheme.accentGreen;
+    }
 
     return Container(
       margin: const EdgeInsets.all(16),
@@ -250,7 +285,9 @@ class _ExpensesSummaryHeader extends StatelessWidget {
         border: Border.all(color: Colors.grey.shade300),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Row 1: Header + Locked Badge
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -285,11 +322,12 @@ class _ExpensesSummaryHeader extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
+          // Row 2: Expense total + Breakdown
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                formatMoney(total),
+                formatMoney(totalExpenses),
                 style: const TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.w900,
@@ -319,6 +357,249 @@ class _ExpensesSummaryHeader extends StatelessWidget {
               ),
             ],
           ),
+
+          if (dailySummary != null) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Divider(height: 1),
+            ),
+            // Row 3: Daily Salary Tracker Header
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.account_balance_wallet_outlined,
+                      size: 16,
+                      color: AppTheme.primaryDark,
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'DAILY SALARY TRACKER',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textSecondary,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Text(
+                    isPercent
+                        ? '${((settings?.salaryPercentBasisPoints ?? 3000) / 100).toStringAsFixed(0)}% of Profit'
+                        : 'Fixed Target: ${formatMoney(targetSalary)}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue.shade800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // Row 4: Salary values
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Target Salary',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      formatMoney(targetSalary),
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    const Text(
+                      'SALARY LEFT TODAY',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      formatMoney(currentSalary),
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        color: salaryColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // Row 5: Salary Warning or Status Banner
+            if (isZeroSalary && (hasSales || totalExpenses > 0)) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.accentRed.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: AppTheme.accentRed.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      color: AppTheme.accentRed,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Warning: Expenses (${formatMoney(totalExpenses)}) have exhausted today\'s profits! P0.00 salary left today.',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.accentRed,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (isSalaryCapped && currentSalary > 0) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.warningAmber.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: AppTheme.warningAmber.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      color: AppTheme.warningAmber,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Low Salary Warning: Expenses reduced your salary to ${formatMoney(currentSalary)} (${formatMoney(targetSalary - currentSalary)} below your target).',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.amber.shade900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (!hasSales) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: Colors.blue.shade700,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'No sales recorded today yet. Complete sales in POS to build up your daily earnings.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.accentGreen.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: AppTheme.accentGreen.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.check_circle_outline,
+                      color: AppTheme.accentGreen,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${formatMoney(currentSalary)} salary available for today after deducting expenses.',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.accentGreen,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
         ],
       ),
     );

@@ -25,56 +25,7 @@ class VoidConfirmationDialog {
     final isLocked = await repo.isDayLocked(sale.createdAt);
     if (!context.mounted) return false;
 
-    if (isLocked) {
-      final shouldReopen = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          icon: const Icon(
-            Icons.lock_clock,
-            size: 40,
-            color: AppTheme.warningAmber,
-          ),
-          title: const Text('Day Payout Locked'),
-          content: Text(
-            'The daily payout for ${DateFormat.yMMMd().format(sale.createdAt)} is locked.\n\n'
-            'To void or edit sales on this day, the day payout must be reopened first.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryDark,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Reopen Day'),
-            ),
-          ],
-        ),
-      );
-
-      if (shouldReopen != true) return false;
-
-      // Reopen day in repository
-      await repo.reopenDay(sale.createdAt);
-      if (!context.mounted) return false;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Day ${DateFormat.yMMMd().format(sale.createdAt)} reopened.',
-          ),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
-
-    if (!context.mounted) return false;
-
-    // Proceed to void confirmation dialog
+    // Proceed to void confirmation dialog first (never unlock before user confirms)
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -101,6 +52,27 @@ class VoidConfirmationDialog {
               ),
             ),
             const SizedBox(height: 12),
+            if (isLocked) ...[
+              Container(
+                padding: const EdgeInsets.all(10),
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.warningAmber.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: AppTheme.warningAmber.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: const Text(
+                  'Notice: This day payout is locked. Confirming this void will unlock and reopen the day.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.primaryDark,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
@@ -133,7 +105,7 @@ class VoidConfirmationDialog {
               minimumSize: const Size(110, 48),
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Void Sale'),
+            child: Text(isLocked ? 'Reopen & Void' : 'Void Sale'),
           ),
         ],
       ),
@@ -141,11 +113,18 @@ class VoidConfirmationDialog {
 
     if (confirmed == true) {
       try {
+        if (isLocked) {
+          await repo.reopenDay(sale.createdAt);
+        }
         await repo.voidSale(sale.id);
         if (!context.mounted) return true;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Sale #${sale.id} has been voided.'),
+            content: Text(
+              isLocked
+                  ? 'Day reopened and Sale #${sale.id} has been voided.'
+                  : 'Sale #${sale.id} has been voided.',
+            ),
             backgroundColor: AppTheme.accentRed,
           ),
         );

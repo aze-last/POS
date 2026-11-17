@@ -22,9 +22,9 @@ final archivedProductsProvider = StreamProvider<List<Product>>((ref) {
   return repo.watchArchivedProducts();
 });
 
-/// Future provider family for product capital history.
-final capitalHistoryProvider =
-    FutureProvider.family<List<CapitalHistoryData>, int>((ref, productId) {
+/// Auto-dispose future provider family for product capital history.
+final capitalHistoryProvider = FutureProvider.autoDispose
+    .family<List<CapitalHistoryData>, int>((ref, productId) {
       final repo = ref.watch(productRepositoryProvider);
       return repo.getCapitalHistory(productId);
     });

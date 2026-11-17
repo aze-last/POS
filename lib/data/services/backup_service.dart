@@ -10,7 +10,7 @@ import '../database/app_database.dart';
 
 /// Service responsible for complete offline JSON backup and restore across all 8 tables.
 class BackupService {
-  static const int currentSchemaVersion = 1;
+  static const int currentSchemaVersion = 3;
   static const String appIdentifier = 'Banana POS';
 
   final AppDatabase _db;
@@ -33,6 +33,7 @@ class BackupService {
     final capitalHistory = await _db.select(_db.capitalHistory).get();
     final sales = await _db.select(_db.sales).get();
     final saleItems = await _db.select(_db.saleItems).get();
+    final saleEdits = await _db.select(_db.saleEdits).get();
     final expenses = await _db.select(_db.expenses).get();
     final restock = await _db.select(_db.restockPurchases).get();
     final payouts = await _db.select(_db.payouts).get();
@@ -52,6 +53,7 @@ class BackupService {
                 'capital_centavos': p.capitalCentavos,
                 'sort_order': p.sortOrder,
                 'archived': p.archived,
+                'image_path': p.imagePath,
               },
             )
             .toList(),
@@ -76,6 +78,8 @@ class BackupService {
                 'paid_centavos': s.paidCentavos,
                 'change_centavos': s.changeCentavos,
                 'voided': s.voided,
+                'edited_at': s.editedAt?.toIso8601String(),
+                'edit_count': s.editCount,
               },
             )
             .toList(),
@@ -89,6 +93,18 @@ class BackupService {
                 'grams': i.grams,
                 'price_per_kg_centavos': i.pricePerKgCentavos,
                 'capital_per_kg_centavos': i.capitalPerKgCentavos,
+              },
+            )
+            .toList(),
+        'sale_edits': saleEdits
+            .map(
+              (e) => {
+                'id': e.id,
+                'sale_id': e.saleId,
+                'edited_at': e.editedAt.toIso8601String(),
+                'before_json': e.beforeJson,
+                'after_json': e.afterJson,
+                'reason': e.reason,
               },
             )
             .toList(),
@@ -162,9 +178,11 @@ class BackupService {
     }
 
     final schemaVersion = data['schema_version'];
-    if (schemaVersion != currentSchemaVersion) {
+    if (schemaVersion is! int ||
+        schemaVersion < 1 ||
+        schemaVersion > currentSchemaVersion) {
       throw FormatException(
-        'Unsupported schema version: $schemaVersion. Expected: $currentSchemaVersion',
+        'Unsupported schema version: $schemaVersion. Expected between 1 and $currentSchemaVersion',
       );
     }
 
@@ -176,6 +194,7 @@ class BackupService {
     // Atomic SQLite transaction ensures complete consistency or total rollback
     await _db.transaction(() async {
       // 1. Delete existing data in reverse foreign-key order
+      await _db.delete(_db.saleEdits).go();
       await _db.delete(_db.saleItems).go();
       await _db.delete(_db.sales).go();
       await _db.delete(_db.capitalHistory).go();
@@ -198,6 +217,7 @@ class BackupService {
                 capitalCentavos: p['capital_centavos'] as int,
                 sortOrder: Value(p['sort_order'] as int? ?? 0),
                 archived: Value(p['archived'] as bool? ?? false),
+                imagePath: Value(p['image_path'] as String?),
               ),
             );
       }
@@ -251,6 +271,12 @@ class BackupService {
                 paidCentavos: s['paid_centavos'] as int,
                 changeCentavos: s['change_centavos'] as int,
                 voided: Value(s['voided'] as bool? ?? false),
+                editedAt: Value(
+                  s['edited_at'] != null
+                      ? DateTime.parse(s['edited_at'] as String)
+                      : null,
+                ),
+                editCount: Value(s['edit_count'] as int? ?? 0),
               ),
             );
       }
@@ -273,7 +299,24 @@ class BackupService {
             );
       }
 
-      // 7. Insert Expenses
+      // 7. Insert Sale Edits
+      final rawEdits = tables['sale_edits'] as List? ?? [];
+      for (final e in rawEdits) {
+        await _db
+            .into(_db.saleEdits)
+            .insert(
+              SaleEditsCompanion.insert(
+                id: Value(e['id'] as int),
+                saleId: e['sale_id'] as int,
+                editedAt: DateTime.parse(e['edited_at'] as String),
+                beforeJson: e['before_json'] as String,
+                afterJson: e['after_json'] as String,
+                reason: Value(e['reason'] as String?),
+              ),
+            );
+      }
+
+      // 8. Insert Expenses
       final rawExpenses = tables['expenses'] as List? ?? [];
       for (final e in rawExpenses) {
         await _db
@@ -294,7 +337,7 @@ class BackupService {
             );
       }
 
-      // 8. Insert Restock Purchases
+      // 9. Insert Restock Purchases
       final rawRestock = tables['restock_purchases'] as List? ?? [];
       for (final r in rawRestock) {
         await _db
@@ -309,7 +352,7 @@ class BackupService {
             );
       }
 
-      // 9. Insert Payouts
+      // 10. Insert Payouts
       final rawPayouts = tables['payouts'] as List? ?? [];
       for (final p in rawPayouts) {
         await _db

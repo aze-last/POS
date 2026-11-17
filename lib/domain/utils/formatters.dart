@@ -25,6 +25,24 @@ String formatMoney(int centavos) {
   return '$prefix$buffer.$centavosStr';
 }
 
+/// Formats integer grams to standard kg string without floating-point conversion.
+/// E.g. 1300 -> "1.300 kg", 50 -> "0.050 kg".
+String formatWeight(int grams) {
+  final kg = grams ~/ 1000;
+  final g = (grams % 1000).abs().toString().padLeft(3, '0');
+  final prefix = grams < 0 ? '-' : '';
+  return '$prefix$kg.$g kg';
+}
+
+/// Formats centavos to plain decimal string without currency symbol (e.g. 3250 -> "32.50").
+String formatCentavosToDecimal(int centavos) {
+  final isNegative = centavos < 0;
+  final absCentavos = centavos.abs();
+  final pesos = absCentavos ~/ 100;
+  final rem = (absCentavos % 100).toString().padLeft(2, '0');
+  return '${isNegative ? '-' : ''}$pesos.$rem';
+}
+
 /// Rounds centavos down to the nearest whole peso (e.g. 3250 -> 3200).
 int roundDownToWholePeso(int centavos) {
   if (centavos <= 0) return 0;

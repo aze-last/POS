@@ -59,6 +59,17 @@ class MainActivity : FlutterActivity() {
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
+
+                        // Explicitly grant read URI permission to all potential package installers
+                        val resInfoList = packageManager.queryIntentActivities(
+                            intent,
+                            android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+                        )
+                        for (resolveInfo in resInfoList) {
+                            val pkg = resolveInfo.activityInfo.packageName
+                            grantUriPermission(pkg, contentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+
                         startActivity(intent)
                         result.success(true)
                     } catch (e: Exception) {

@@ -210,5 +210,43 @@ void main() {
         await cleanUpWidget(tester);
       },
     );
+
+    testWidgets(
+      're-syncs controller fields when settings stream updates externally',
+      (tester) async {
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pumpAndSettle();
+
+        expect(find.text('30'), findsOneWidget);
+
+        // Update settings in database directly
+        await payoutRepo.updateSettings(
+          salaryMode: 'percent',
+          salaryPercentBasisPoints: 4500,
+          fixedDailySalaryCentavos: 0,
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('45'), findsOneWidget);
+
+        await cleanUpWidget(tester);
+      },
+    );
+
+    testWidgets(
+      'renders multi-device sync card with offline status when unconfigured',
+      (tester) async {
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pumpAndSettle();
+
+        expect(find.text('Multi-Device Sync'), findsOneWidget);
+        expect(
+          find.text('Offline only. Credentials not configured.'),
+          findsOneWidget,
+        );
+
+        await cleanUpWidget(tester);
+      },
+    );
   });
 }

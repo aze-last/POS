@@ -217,9 +217,11 @@ void main() {
 
       await repository.restoreProduct(cardava.id);
       expect((await repository.getArchivedProducts()), isEmpty);
-      final restored = (await repository.getActiveProducts()).first;
+      final active = await repository.getActiveProducts();
+      final restored = active.firstWhere((p) => p.id == cardava.id);
       expect(restored.id, cardava.id);
       expect(restored.archived, isFalse);
+      expect(active.last.id, cardava.id);
     });
 
     test('restore rejects a name already used by an active product', () async {

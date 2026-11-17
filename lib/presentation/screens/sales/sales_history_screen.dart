@@ -7,7 +7,10 @@ import '../../../domain/models/weight.dart';
 import '../../../domain/utils/formatters.dart';
 import '../../providers/sale_providers.dart';
 import '../../theme/app_theme.dart';
+import 'edit_sale_dialog.dart';
 import 'sale_detail_sheet.dart';
+import 'sale_edit_history_dialog.dart';
+import 'void_confirmation_dialog.dart';
 
 /// Screen displaying the complete historical audit log of sales.
 ///
@@ -435,14 +438,58 @@ class _DayHeader extends ConsumerWidget {
 }
 
 /// Compact touch-friendly card representing an individual sale.
-class _SaleCard extends StatelessWidget {
+class _SaleCard extends ConsumerWidget {
   final SaleWithDetails saleWithDetails;
   final VoidCallback onTap;
 
   const _SaleCard({required this.saleWithDetails, required this.onTap});
 
+  Future<void> _handleEdit(BuildContext context, WidgetRef ref) async {
+    final repo = ref.read(saleRepositoryProvider);
+    final isLocked = await repo.isDayLocked(saleWithDetails.sale.createdAt);
+
+    if (isLocked) {
+      if (!context.mounted) return;
+      final reopen = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Day Payout Locked'),
+          content: const Text('This day is paid out. Reopen it first.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.warningAmber,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Reopen Day'),
+            ),
+          ],
+        ),
+      );
+
+      if (reopen == true) {
+        await repo.reopenDay(saleWithDetails.sale.createdAt);
+        if (!context.mounted) return;
+        await EditSaleDialog.show(context, saleWithDetails);
+      }
+      return;
+    }
+
+    if (context.mounted) {
+      await EditSaleDialog.show(context, saleWithDetails);
+    }
+  }
+
+  Future<void> _handleVoid(BuildContext context, WidgetRef ref) async {
+    await VoidConfirmationDialog.show(context, ref, saleWithDetails);
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final sale = saleWithDetails.sale;
     final items = saleWithDetails.items;
     final isVoided = sale.voided;
@@ -476,32 +523,74 @@ class _SaleCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header row: ID, Time, VOIDED badge
+              // Header row: ID, Time, EDITED badge, VOIDED badge
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      Text(
-                        'Sale #${sale.id}',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 15,
-                          color: isVoided
-                              ? AppTheme.textSecondary
-                              : AppTheme.primaryDark,
+                  Expanded(
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        Text(
+                          'Sale #${sale.id}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 15,
+                            color: isVoided
+                                ? AppTheme.textSecondary
+                                : AppTheme.primaryDark,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        DateFormat('h:mm a').format(sale.createdAt),
-                        style: const TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 13,
+                        Text(
+                          DateFormat('h:mm a').format(sale.createdAt),
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 13,
+                          ),
                         ),
-                      ),
-                    ],
+                        if (sale.editCount > 0)
+                          GestureDetector(
+                            onTap: () => SaleEditHistoryDialog.show(
+                              context,
+                              saleId: sale.id,
+                            ),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.blue.shade300),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.edit_note,
+                                    size: 13,
+                                    color: Colors.blue.shade800,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    'Edited',
+                                    style: TextStyle(
+                                      color: Colors.blue.shade900,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 8),
                   if (isVoided)
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -561,7 +650,7 @@ class _SaleCard extends StatelessWidget {
               ),
               const SizedBox(height: 10),
 
-              // Bottom financial row
+              // Bottom financial row with quick Edit & Void actions
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -578,16 +667,49 @@ class _SaleCard extends StatelessWidget {
                     ),
                   ),
 
-                  // Profit indicator
+                  // Profit indicator or quick actions
                   if (!isVoided)
-                    Text(
-                      '+${formatMoney(saleWithDetails.profitCentavos)} profit',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: saleWithDetails.profitCentavos >= 0
-                            ? AppTheme.accentGreen
-                            : AppTheme.accentRed,
+                    Flexible(
+                      child: Wrap(
+                        alignment: WrapAlignment.end,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 6,
+                        runSpacing: 2,
+                        children: [
+                          Text(
+                            '+${formatMoney(saleWithDetails.profitCentavos)} profit',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: saleWithDetails.profitCentavos >= 0
+                                  ? AppTheme.accentGreen
+                                  : AppTheme.accentRed,
+                            ),
+                          ),
+                          TextButton(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              minimumSize: const Size(0, 32),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: () => _handleEdit(context, ref),
+                            child: const Text('Edit'),
+                          ),
+                          TextButton(
+                            style: TextButton.styleFrom(
+                              foregroundColor: AppTheme.accentRed,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              minimumSize: const Size(0, 32),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: () => _handleVoid(context, ref),
+                            child: const Text('Void'),
+                          ),
+                        ],
                       ),
                     )
                   else

@@ -29,8 +29,20 @@ android {
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
                 val storePath = keystoreProperties.getProperty("storeFile")
-                storeFile = if (storePath != null) rootProject.file(storePath) else null
+                val storeFileObj = if (storePath != null) rootProject.file(storePath) else null
+                if (storeFileObj != null && !storeFileObj.exists()) {
+                    throw GradleException("Keystore file defined in android/key.properties does not exist: ${storeFileObj.absolutePath}. Release builds strictly require signing configuration per AGENTS.md §7.")
+                }
+                storeFile = storeFileObj
                 storePassword = keystoreProperties.getProperty("storePassword")
+                enableV1Signing = true
+                enableV2Signing = true
+            } else {
+                // AGENTS.md §7: Release builds strictly fail if key.properties is missing; no debug fallback.
+                val isReleaseBuild = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+                if (isReleaseBuild) {
+                    throw GradleException("android/key.properties is missing! Release builds strictly require signing configuration per AGENTS.md §7.")
+                }
             }
         }
     }
@@ -45,6 +57,12 @@ android {
 
     buildTypes {
         release {
+            if (!keystorePropertiesFile.exists()) {
+                val isReleaseBuild = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+                if (isReleaseBuild) {
+                    throw GradleException("android/key.properties is missing! Release builds strictly require signing configuration per AGENTS.md §7.")
+                }
+            }
             signingConfig = signingConfigs.getByName("release")
         }
     }

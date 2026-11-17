@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/database/app_database.dart';
 import '../../data/repositories/sale_repository.dart';
 import 'database_provider.dart';
 
@@ -45,3 +46,10 @@ final isDayLockedProvider = FutureProvider.family<bool, DateTime>((
   final repo = ref.watch(saleRepositoryProvider);
   return repo.isDayLocked(date);
 });
+
+/// Stream of audit edits for a specific sale.
+final saleEditsProvider = StreamProvider.autoDispose
+    .family<List<SaleEdit>, int>((ref, saleId) {
+      final repo = ref.watch(saleRepositoryProvider);
+      return repo.watchSaleEdits(saleId);
+    });

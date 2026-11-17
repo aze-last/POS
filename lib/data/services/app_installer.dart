@@ -12,12 +12,12 @@ class AppInstaller {
       final bool? canInstall = await _channel.invokeMethod<bool>(
         'canRequestPackageInstalls',
       );
-      return canInstall ?? true;
+      return canInstall ?? false;
     } on MissingPluginException {
       // In test or non-Android environments
       return true;
-    } catch (_) {
-      return true;
+    } on PlatformException catch (e) {
+      throw Exception('Failed to check install permission: ${e.message}');
     }
   }
 
@@ -25,8 +25,10 @@ class AppInstaller {
   static Future<void> openInstallPermissionSettings() async {
     try {
       await _channel.invokeMethod('openInstallPermissionSettings');
-    } catch (_) {
-      // Ignored
+    } on MissingPluginException {
+      // In test environments
+    } on PlatformException catch (e) {
+      throw Exception('Failed to open install settings: ${e.message}');
     }
   }
 
@@ -37,6 +39,8 @@ class AppInstaller {
         'filePath': filePath,
       });
       return success ?? false;
+    } on MissingPluginException {
+      return true;
     } on PlatformException catch (e) {
       throw Exception('Package installer error: ${e.message}');
     }

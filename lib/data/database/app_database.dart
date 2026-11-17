@@ -15,17 +15,20 @@ part 'app_database.g.dart';
     CapitalHistory,
     Sales,
     SaleItems,
+    SaleEdits,
     Expenses,
     RestockPurchases,
     Payouts,
     Settings,
+    OutboxItems,
+    SyncStates,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? e]) : super(e ?? _openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration {
@@ -34,18 +37,99 @@ class AppDatabase extends _$AppDatabase {
         await m.createAll();
         await _seedDefaults();
       },
+      onUpgrade: (Migrator m, int from, int to) async {
+        if (from < 2) {
+          await _safeAddColumn(m, sales, sales.editedAt);
+          await _safeAddColumn(m, sales, sales.editCount);
+          await _safeCreateTable(m, saleEdits);
+        }
+        if (from < 3) {
+          await _safeAddColumn(m, products, products.imagePath);
+        }
+        if (from < 4) {
+          await _safeAddColumn(m, products, products.syncId);
+          await _safeAddColumn(m, products, products.updatedAt);
+          await _safeAddColumn(m, products, products.deletedAt);
+
+          await _safeAddColumn(m, capitalHistory, capitalHistory.syncId);
+          await _safeAddColumn(m, capitalHistory, capitalHistory.updatedAt);
+
+          await _safeAddColumn(m, sales, sales.syncId);
+          await _safeAddColumn(m, sales, sales.updatedAt);
+          await _safeAddColumn(m, sales, sales.deletedAt);
+
+          await _safeAddColumn(m, saleItems, saleItems.syncId);
+          await _safeAddColumn(m, saleItems, saleItems.updatedAt);
+          await _safeAddColumn(m, saleItems, saleItems.deletedAt);
+
+          await _safeAddColumn(m, saleEdits, saleEdits.syncId);
+
+          await _safeAddColumn(m, expenses, expenses.syncId);
+          await _safeAddColumn(m, expenses, expenses.updatedAt);
+          await _safeAddColumn(m, expenses, expenses.deletedAt);
+
+          await _safeAddColumn(m, restockPurchases, restockPurchases.syncId);
+          await _safeAddColumn(m, restockPurchases, restockPurchases.updatedAt);
+          await _safeAddColumn(m, restockPurchases, restockPurchases.deletedAt);
+
+          await _safeAddColumn(m, payouts, payouts.syncId);
+          await _safeAddColumn(m, payouts, payouts.updatedAt);
+          await _safeAddColumn(m, payouts, payouts.deletedAt);
+
+          await _safeAddColumn(m, settings, settings.syncId);
+          await _safeAddColumn(m, settings, settings.updatedAt);
+
+          await _safeCreateTable(m, outboxItems);
+          await _safeCreateTable(m, syncStates);
+        }
+      },
       beforeOpen: (details) async {
         // Enforce foreign key constraints in SQLite
         await customStatement('PRAGMA foreign_keys = ON;');
-        // Indexes on sales.created_at and expenses.date (Spec Section 4)
+        // Indexes on sales.created_at, expenses.date, and sale_edits.sale_id (Spec Section 4)
         await customStatement(
           'CREATE INDEX IF NOT EXISTS sales_created_at_idx ON sales (created_at);',
         );
         await customStatement(
           'CREATE INDEX IF NOT EXISTS expenses_date_idx ON expenses (date);',
         );
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS sale_edits_sale_id_idx ON sale_edits (sale_id);',
+        );
       },
     );
+  }
+
+  /// Safely adds a column to a table, ignoring if the column already exists.
+  /// This prevents failed or partially-applied migrations from crashing on retry.
+  Future<void> _safeAddColumn(
+    Migrator m,
+    TableInfo table,
+    GeneratedColumn column,
+  ) async {
+    try {
+      await m.addColumn(table, column);
+    } catch (e) {
+      final msg = e.toString().toLowerCase();
+      if (msg.contains('duplicate column name') ||
+          msg.contains('already exists')) {
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  /// Safely creates a table, ignoring if the table already exists.
+  Future<void> _safeCreateTable(Migrator m, TableInfo table) async {
+    try {
+      await m.createTable(table);
+    } catch (e) {
+      final msg = e.toString().toLowerCase();
+      if (msg.contains('already exists')) {
+        return;
+      }
+      rethrow;
+    }
   }
 
   /// Seeds default starter products and initial settings.

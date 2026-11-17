@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../domain/services/payout_calculator.dart';
 import '../../../domain/services/pricing_calculator.dart';
 import '../../../domain/utils/formatters.dart';
 import '../../providers/expense_providers.dart';
+import '../../providers/payout_providers.dart';
 import '../../providers/product_providers.dart';
 import '../../theme/app_theme.dart';
 
@@ -46,12 +48,59 @@ class _AddExpenseDialogState extends ConsumerState<AddExpenseDialog> {
   int get _computedSpoilageGrams {
     final kg = int.tryParse(_kgController.text.trim()) ?? 0;
     final g = int.tryParse(_gController.text.trim()) ?? 0;
+    if (kg < 0 || g < 0 || g > 999) return 0;
     return kg * 1000 + g;
   }
 
   @override
   Widget build(BuildContext context) {
     final activeProductsAsync = ref.watch(activeProductsProvider);
+    final dailySummaryAsync = ref.watch(dailySummaryStateProvider(widget.date));
+    final dailySummary = dailySummaryAsync.value;
+
+    int additionalExpenseCentavos = 0;
+    if (_selectedType == 'spoilage') {
+      final grams = _computedSpoilageGrams;
+      if (_selectedProductId != null && grams > 0) {
+        final product = activeProductsAsync.value
+            ?.where((p) => p.id == _selectedProductId)
+            .firstOrNull;
+        if (product != null) {
+          additionalExpenseCentavos = PricingCalculator.computeLineCapital(
+            grams: grams,
+            capitalPerKgCentavos: product.capitalCentavos,
+          );
+        }
+      }
+    } else {
+      additionalExpenseCentavos =
+          parsePesoStringToCentavos(_amountController.text) ?? 0;
+    }
+
+    int currentSalary = 0;
+    int projectedSalary = 0;
+    final hasSummary = dailySummary != null;
+
+    if (dailySummary != null) {
+      final calc = dailySummary.calculation;
+      currentSalary = calc.actualSalaryCentavos;
+      final settings = dailySummary.settings;
+
+      final projectedCalc = PayoutCalculator.calculate(
+        salesCentavos: dailySummary.totalChargedCentavos,
+        capitalSoldCentavos: dailySummary.capitalSoldCentavos,
+        spoilageCentavos:
+            dailySummary.spoilageCentavos +
+            (_selectedType == 'spoilage' ? additionalExpenseCentavos : 0),
+        otherExpensesCentavos:
+            dailySummary.otherExpensesCentavos +
+            (_selectedType != 'spoilage' ? additionalExpenseCentavos : 0),
+        salaryMode: SalaryMode.fromString(settings.salaryMode),
+        salaryPercentBasisPoints: settings.salaryPercentBasisPoints,
+        fixedDailySalaryCentavos: settings.fixedDailySalaryCentavos,
+      );
+      projectedSalary = projectedCalc.suggestedSalaryCentavos;
+    }
 
     return AlertDialog(
       title: const Text('Add Expense / Loss'),
@@ -275,6 +324,7 @@ class _AddExpenseDialogState extends ConsumerState<AddExpenseDialog> {
                     prefixText: 'P ',
                     border: OutlineInputBorder(),
                   ),
+                  onChanged: (_) => setState(() {}),
                 ),
                 const SizedBox(height: 8),
                 // Quick chips
@@ -307,6 +357,112 @@ class _AddExpenseDialogState extends ConsumerState<AddExpenseDialog> {
                   border: const OutlineInputBorder(),
                 ),
               ),
+
+              // Live impact on daily salary preview card
+              if (hasSummary) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color:
+                        additionalExpenseCentavos > 0 &&
+                            projectedSalary == 0 &&
+                            currentSalary > 0
+                        ? AppTheme.accentRed.withValues(alpha: 0.08)
+                        : (additionalExpenseCentavos > 0 &&
+                                  projectedSalary < currentSalary
+                              ? AppTheme.warningAmber.withValues(alpha: 0.12)
+                              : Colors.blue.shade50),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color:
+                          additionalExpenseCentavos > 0 &&
+                              projectedSalary == 0 &&
+                              currentSalary > 0
+                          ? AppTheme.accentRed.withValues(alpha: 0.3)
+                          : (additionalExpenseCentavos > 0 &&
+                                    projectedSalary < currentSalary
+                                ? AppTheme.warningAmber.withValues(alpha: 0.4)
+                                : Colors.blue.shade200),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(
+                                Icons.account_balance_wallet_outlined,
+                                size: 16,
+                                color: AppTheme.primaryDark,
+                              ),
+                              SizedBox(width: 6),
+                              Text(
+                                'Salary Left Today:',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.textPrimary,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Text(
+                            formatMoney(projectedSalary),
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                              color:
+                                  additionalExpenseCentavos > 0 &&
+                                      projectedSalary == 0 &&
+                                      currentSalary > 0
+                                  ? AppTheme.accentRed
+                                  : (additionalExpenseCentavos > 0 &&
+                                            projectedSalary < currentSalary
+                                        ? AppTheme.warningAmber
+                                        : AppTheme.accentGreen),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (additionalExpenseCentavos > 0) ...[
+                        const SizedBox(height: 6),
+                        if (projectedSalary == 0 && currentSalary > 0) ...[
+                          const Text(
+                            '🚨 Warning: This expense will wipe out your remaining salary today (P0.00 left)!',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.accentRed,
+                            ),
+                          ),
+                        ] else if (projectedSalary < currentSalary) ...[
+                          Text(
+                            '⚠️ Warning: Reduces your salary by ${formatMoney(currentSalary - projectedSalary)} (from ${formatMoney(currentSalary)} to ${formatMoney(projectedSalary)}).',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.amber.shade900,
+                            ),
+                          ),
+                        ] else ...[
+                          const Text(
+                            '✅ Sufficient profit to cover this expense without reducing your daily salary.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: AppTheme.accentGreen,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -321,11 +477,20 @@ class _AddExpenseDialogState extends ConsumerState<AddExpenseDialog> {
             final repo = ref.read(expenseRepositoryProvider);
             try {
               if (_selectedType == 'spoilage') {
+                final g = int.tryParse(_gController.text.trim()) ?? 0;
+                if (g < 0 || g > 999) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Grams must be between 0 and 999'),
+                    ),
+                  );
+                  return;
+                }
                 final grams = _computedSpoilageGrams;
                 if (grams <= 0) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Please enter spoiled weight'),
+                      content: Text('Please enter valid spoiled weight (> 0g)'),
                     ),
                   );
                   return;

@@ -15,13 +15,28 @@ if [ ! -f "pubspec.yaml" ]; then
     exit 1
 fi
 
-# 2. Check keystore configuration
+# 2. Check keystore configuration and keystore file
 if [ ! -f "android/key.properties" ]; then
     echo "Error: android/key.properties is missing! Release builds require a configured release keystore. See AGENTS.md for setup instructions." >&2
     exit 1
 fi
 
-# 3. Read current version from pubspec.yaml
+STORE_PATH=$(grep '^storeFile=' android/key.properties | cut -d'=' -f2 | tr -d ' \r')
+if [ -n "$STORE_PATH" ]; then
+    if [ ! -f "android/$STORE_PATH" ] && [ ! -f "$STORE_PATH" ]; then
+        echo "Error: Keystore file '$STORE_PATH' referenced in android/key.properties not found! Per AGENTS.md §7, restore release.keystore." >&2
+        exit 1
+    fi
+else
+    echo "Error: storeFile property missing in android/key.properties." >&2
+    exit 1
+fi
+
+# 3. Run test suite BEFORE touching pubspec.yaml or CHANGELOG.md (p7-15)
+echo "Running tests prior to release bump..."
+flutter test
+
+# 4. Read current version from pubspec.yaml
 VERSION_LINE=$(grep '^version:' pubspec.yaml)
 RAW_VERSION=$(echo "$VERSION_LINE" | sed -E 's/version:[[:space:]]*//')
 SEMVER=$(echo "$RAW_VERSION" | cut -d'+' -f1)
@@ -59,11 +74,11 @@ TAG="v$NEW_VERSION_NAME"
 
 echo "Bumping version: $OLD_VERSION -> $NEW_VERSION (Tag: $TAG)"
 
-# 4. Update pubspec.yaml
+# 5. Update pubspec.yaml
 sed -i.bak -E "s/^version:[[:space:]]*.*/version: $NEW_VERSION/" pubspec.yaml
 rm -f pubspec.yaml.bak
 
-# 5. Update CHANGELOG.md
+# 6. Update CHANGELOG.md
 DATE_STR=$(date +%Y-%m-%d)
 ENTRY="## [$TAG] - $DATE_STR\n\n$NOTES\n"
 
@@ -73,13 +88,13 @@ else
     echo -e "# Changelog\n\n$ENTRY" > CHANGELOG.md
 fi
 
-# 6. Run test suite
-echo "Running tests..."
-flutter test
-
 # 7. Build signed release APK
 echo "Building release APK..."
-flutter build apk --release
+if [ -f ".env" ]; then
+    flutter build apk --release --dart-define-from-file=.env
+else
+    flutter build apk --release
+fi
 
 # 8. Prepare releases directory
 mkdir -p releases

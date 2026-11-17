@@ -1,4 +1,6 @@
-import 'package:flutter_test/flutter_test.dart';
+// ignore_for_file: deprecated_member_use, depend_on_referenced_packages
+import 'package:test_api/test_api.dart';
+import 'package:matcher/expect.dart';
 import 'package:pos/domain/services/pricing_calculator.dart';
 
 void main() {
@@ -36,6 +38,22 @@ void main() {
       expect(
         PricingCalculator.computeLineValue(grams: 499, pricePerKgCentavos: 1),
         equals(0),
+      );
+
+      // Rejects non-positive price
+      expect(
+        () => PricingCalculator.computeLineValue(
+          grams: 1000,
+          pricePerKgCentavos: 0,
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => PricingCalculator.computeLineValue(
+          grams: 1000,
+          pricePerKgCentavos: -10,
+        ),
+        throwsArgumentError,
       );
     });
 

@@ -1,4 +1,6 @@
-import 'package:flutter_test/flutter_test.dart';
+// ignore_for_file: deprecated_member_use, depend_on_referenced_packages
+import 'package:test_api/test_api.dart';
+import 'package:matcher/expect.dart';
 import 'package:pos/domain/models/money.dart';
 import 'package:pos/domain/utils/formatters.dart';
 

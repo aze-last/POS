@@ -74,6 +74,11 @@ class PayoutRepository {
             .getSingleOrNull();
 
     if (existing != null) {
+      if (existing.locked) {
+        throw StateError(
+          'Cannot modify locked payout for this date without unlocking it first.',
+        );
+      }
       await (_db.update(
         _db.payouts,
       )..where((p) => p.id.equals(existing.id))).write(

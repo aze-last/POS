@@ -46,16 +46,19 @@ class _PayoutSectionState extends ConsumerState<PayoutSection> {
     if (isLocked && payout != null) {
       _overrideToParentsCentavos = payout.toParentsCentavos;
       _overrideSalaryCentavos = payout.salaryCentavos;
-      _toParentsController.text = (payout.toParentsCentavos / 100)
-          .toStringAsFixed(2);
-      _salaryController.text = (payout.salaryCentavos / 100).toStringAsFixed(2);
+      _toParentsController.text = formatCentavosToDecimal(
+        payout.toParentsCentavos,
+      );
+      _salaryController.text = formatCentavosToDecimal(payout.salaryCentavos);
     } else {
       _overrideToParentsCentavos = null;
       _overrideSalaryCentavos = null;
-      _toParentsController.text = (calc.suggestedToParentsCentavos / 100)
-          .toStringAsFixed(2);
-      _salaryController.text = (calc.suggestedSalaryCentavos / 100)
-          .toStringAsFixed(2);
+      _toParentsController.text = formatCentavosToDecimal(
+        calc.suggestedToParentsCentavos,
+      );
+      _salaryController.text = formatCentavosToDecimal(
+        calc.suggestedSalaryCentavos,
+      );
     }
   }
 
@@ -78,9 +81,9 @@ class _PayoutSectionState extends ConsumerState<PayoutSection> {
       capitalSoldCentavos: summary.capitalSoldCentavos,
       spoilageCentavos: summary.spoilageCentavos,
       otherExpensesCentavos: summary.otherExpensesCentavos,
-      salaryMode: SalaryMode.percent, // or from settings
-      salaryPercentBasisPoints: 3000,
-      fixedDailySalaryCentavos: 0,
+      salaryMode: SalaryMode.fromString(summary.settings.salaryMode),
+      salaryPercentBasisPoints: summary.settings.salaryPercentBasisPoints,
+      fixedDailySalaryCentavos: summary.settings.fixedDailySalaryCentavos,
       actualToParentsCentavos: _overrideToParentsCentavos,
       actualSalaryCentavos: _overrideSalaryCentavos,
     );

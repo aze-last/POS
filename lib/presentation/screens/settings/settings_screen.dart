@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../data/database/app_database.dart';
+import '../../../data/services/sync_service.dart';
 import '../../../domain/utils/formatters.dart';
 import '../../providers/payout_providers.dart';
+import '../../providers/sync_providers.dart';
 import '../../providers/update_providers.dart';
 import '../../theme/app_theme.dart';
 import 'backup_view.dart';
@@ -80,14 +83,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     super.dispose();
   }
 
-  void _initFields(dynamic setting) {
+  void _initFields(Setting setting) {
     if (_initialized) return;
     _selectedMode = setting.salaryMode;
     // Basis points e.g. 3000 -> 30%
     final percent = setting.salaryPercentBasisPoints ~/ 100;
     _percentController.text = percent.toString();
-    final fixedPesos = setting.fixedDailySalaryCentavos ~/ 100;
-    _fixedSalaryController.text = fixedPesos.toString();
+    _fixedSalaryController.text = formatCentavosToDecimal(
+      setting.fixedDailySalaryCentavos,
+    );
     _initialized = true;
   }
 
@@ -146,8 +150,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AsyncValue<Setting>>(settingsStreamProvider, (prev, next) {
+      final newSetting = next.value;
+      if (newSetting != null && !_isSaving && prev?.value != newSetting) {
+        _selectedMode = newSetting.salaryMode;
+        final percent = newSetting.salaryPercentBasisPoints ~/ 100;
+        _percentController.text = percent.toString();
+        _fixedSalaryController.text = formatCentavosToDecimal(
+          newSetting.fixedDailySalaryCentavos,
+        );
+        if (mounted) setState(() {});
+      }
+    });
+
     final settingsAsync = ref.watch(settingsStreamProvider);
     final versionAsync = ref.watch(installedVersionProvider);
+    final syncState = ref.watch(syncStateProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings & Backup')),
@@ -339,6 +357,144 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
                 // Offline Backup Section
                 const BackupView(),
+
+                const SizedBox(height: 20),
+
+                // Multi-Device Cloud Sync Card (Supabase Step 9)
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: const BorderSide(
+                      color: AppTheme.borderSubtle,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: syncState.isConfigured
+                                    ? AppTheme.accentGreen.withValues(
+                                        alpha: 0.15,
+                                      )
+                                    : AppTheme.borderSubtle.withValues(
+                                        alpha: 0.3,
+                                      ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(
+                                syncState.isConfigured
+                                    ? Icons.cloud_done_rounded
+                                    : Icons.cloud_off_rounded,
+                                color: syncState.isConfigured
+                                    ? AppTheme.accentGreen
+                                    : AppTheme.textSecondary,
+                                size: 24,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Multi-Device Sync',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    !syncState.isConfigured
+                                        ? 'Offline only. Credentials not configured.'
+                                        : syncState.status == SyncStatus.syncing
+                                        ? 'Synchronizing data...'
+                                        : syncState.lastSyncedAt != null
+                                        ? 'Last synced: ${syncState.lastSyncedAt!.toLocal().toString().substring(0, 16)}'
+                                        : 'Ready to sync (Supabase)',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: AppTheme.textSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (syncState.isConfigured) ...[
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            icon: syncState.status == SyncStatus.syncing
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.sync_rounded, size: 20),
+                            label: Text(
+                              syncState.status == SyncStatus.syncing
+                                  ? 'Syncing with Supabase...'
+                                  : 'Sync Now',
+                            ),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppTheme.primaryDark,
+                              minimumSize: const Size.fromHeight(50),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: syncState.status == SyncStatus.syncing
+                                ? null
+                                : () async {
+                                    await ref
+                                        .read(syncStateProvider.notifier)
+                                        .syncNow();
+                                    final current = ref.read(syncStateProvider);
+                                    if (!context.mounted) return;
+                                    if (current.status == SyncStatus.success) {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Multi-device sync completed successfully!',
+                                          ),
+                                          backgroundColor: AppTheme.accentGreen,
+                                        ),
+                                      );
+                                    } else if (current.status ==
+                                        SyncStatus.error) {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Sync failed: ${current.errorMessage ?? "Network error"}',
+                                          ),
+                                          backgroundColor: AppTheme.dangerColor,
+                                        ),
+                                      );
+                                    }
+                                  },
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
 
                 const SizedBox(height: 20),
 

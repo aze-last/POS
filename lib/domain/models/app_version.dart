@@ -58,8 +58,10 @@ class AppVersion implements Comparable<AppVersion> {
     if (major != other.major) return major.compareTo(other.major);
     if (minor != other.minor) return minor.compareTo(other.minor);
     if (patch != other.patch) return patch.compareTo(other.patch);
-    if (build != null && other.build != null && build != other.build) {
-      return build!.compareTo(other.build!);
+    final thisBuild = build ?? 0;
+    final otherBuild = other.build ?? 0;
+    if (thisBuild != otherBuild) {
+      return thisBuild.compareTo(otherBuild);
     }
     return 0;
   }

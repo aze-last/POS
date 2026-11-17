@@ -120,13 +120,39 @@ void main() {
     );
 
     test('deletes restock purchase', () async {
+      final date = DateTime(2026, 11, 10);
       final id = await repository.addRestockPurchase(
-        date: DateTime(2026, 11, 10),
+        date: date,
         amountCentavos: 100000,
       );
 
       expect((await repository.getAllRestockPurchases()).length, 1);
 
+      // Lock the day
+      await db
+          .into(db.payouts)
+          .insert(
+            PayoutsCompanion.insert(
+              date: date,
+              toParentsCentavos: 50000,
+              salaryCentavos: 10000,
+              reserveCentavos: 5000,
+              locked: const Value(true),
+            ),
+          );
+
+      // Attempting to delete on locked day throws StateError
+      await expectLater(
+        repository.deleteRestockPurchase(id),
+        throwsA(isA<StateError>()),
+      );
+
+      // Unlock the day
+      await (db.update(db.payouts)..where((p) => p.date.equals(date))).write(
+        const PayoutsCompanion(locked: Value(false)),
+      );
+
+      // Now deletion succeeds
       await repository.deleteRestockPurchase(id);
       expect((await repository.getAllRestockPurchases()).isEmpty, isTrue);
     });

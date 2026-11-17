@@ -6,6 +6,7 @@ import '../../providers/backup_providers.dart';
 import '../../providers/cart_provider.dart';
 import '../../providers/product_providers.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/product_image_widget.dart';
 import '../expenses/expenses_screen.dart';
 import '../parents/parents_balance_screen.dart';
 import '../products/products_screen.dart';
@@ -300,69 +301,105 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                     crossAxisCount: 2,
                     crossAxisSpacing: 14,
                     mainAxisSpacing: 14,
-                    childAspectRatio: 1.15,
+                    childAspectRatio: 0.88,
                   ),
                   itemCount: products.length,
                   itemBuilder: (context, index) {
                     final product = products[index];
                     return Card(
                       elevation: 0,
+                      clipBehavior: Clip.antiAlias,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: const BorderSide(
+                          color: AppTheme.borderSubtle,
+                          width: 0.8,
+                        ),
+                      ),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(12),
                         onTap: () =>
                             WeighingBottomSheet.show(context, product: product),
-                        child: Padding(
-                          padding: const EdgeInsets.all(14.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                product.name,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 19,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppTheme.textPrimary,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Prominent product photo / eco placeholder
+                            Expanded(
+                              flex: 5,
+                              child: ProductImageWidget(
+                                imagePath: product.imagePath,
+                                width: double.infinity,
+                                height: double.infinity,
+                                fit: BoxFit.cover,
+                                placeholderIconSize: 34,
+                              ),
+                            ),
+                            // Variety name and pricing info
+                            Expanded(
+                              flex: 4,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10.0,
+                                  vertical: 8.0,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      product.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppTheme.textPrimary,
+                                      ),
+                                    ),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 2,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.center,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.amber.shade50,
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
+                                            border: Border.all(
+                                              color: Colors.amber.shade300,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            '${formatMoney(product.defaultPriceCentavos)}/kg',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 13,
+                                              color: Colors.amber.shade900,
+                                            ),
+                                          ),
+                                        ),
+                                        Text(
+                                          'Cap: ${formatMoney(product.capitalCentavos)}/kg',
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: AppTheme.textSecondary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                 ),
                               ),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 3,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.amber.shade50,
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(
-                                        color: Colors.amber.shade300,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      '${formatMoney(product.defaultPriceCentavos)}/kg',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 15,
-                                        color: Colors.amber.shade900,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Cap: ${formatMoney(product.capitalCentavos)}/kg',
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: AppTheme.textSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
                     );
@@ -399,29 +436,44 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.shopping_bag, color: Colors.white),
-                          const SizedBox(width: 8),
+                          const Icon(
+                            Icons.shopping_bag,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 6),
                           Text(
                             '${cart.totalItemCount} ${cart.totalItemCount == 1 ? 'item' : 'items'}',
                             style: const TextStyle(
-                              fontSize: 17,
+                              fontSize: 15,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                         ],
                       ),
-                      Text(
-                        'Total: ${formatMoney(cart.chargedCentavos)}',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                      Flexible(
+                        child: Text(
+                          'Total: ${formatMoney(cart.chargedCentavos)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                       const Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text('Checkout', style: TextStyle(fontSize: 16)),
-                          Icon(Icons.chevron_right, color: Colors.white),
+                          Text('Checkout', style: TextStyle(fontSize: 15)),
+                          Icon(
+                            Icons.chevron_right,
+                            color: Colors.white,
+                            size: 20,
+                          ),
                         ],
                       ),
                     ],

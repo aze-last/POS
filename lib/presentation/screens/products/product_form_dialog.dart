@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../data/database/app_database.dart';
+import '../../../data/services/product_image_service.dart';
+import '../../../domain/models/product_validator.dart';
 import '../../../domain/utils/formatters.dart';
 import '../../providers/product_providers.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/product_image_widget.dart';
 
 /// Modal bottom sheet for adding or editing a banana product.
 class ProductFormDialog extends ConsumerStatefulWidget {
@@ -30,7 +34,10 @@ class _ProductFormDialogState extends ConsumerState<ProductFormDialog> {
   late final TextEditingController _nameController;
   late final TextEditingController _priceController;
   late final TextEditingController _capitalController;
+  final _imageService = ProductImageService();
 
+  String? _imagePath;
+  bool _imageChanged = false;
   String? _errorMessage;
   bool _isSaving = false;
 
@@ -41,6 +48,7 @@ class _ProductFormDialogState extends ConsumerState<ProductFormDialog> {
     super.initState();
     final p = widget.productToEdit;
     _nameController = TextEditingController(text: p?.name ?? '');
+    _imagePath = p?.imagePath;
 
     // Display pesos nicely (e.g. 3000 centavos -> "30.00")
     final priceStr = p != null
@@ -62,21 +70,89 @@ class _ProductFormDialogState extends ConsumerState<ProductFormDialog> {
     super.dispose();
   }
 
+  Future<void> _pickImage(ImageSource source) async {
+    final path = await _imageService.pickAndSaveImage(source: source);
+    if (path != null) {
+      setState(() {
+        _imagePath = path;
+        _imageChanged = true;
+      });
+    }
+  }
+
+  void _showImagePickerOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surfaceLight,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(
+                  Icons.camera_alt_outlined,
+                  color: AppTheme.primaryDark,
+                ),
+                title: const Text(
+                  'Take Photo with Camera',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickImage(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.photo_library_outlined,
+                  color: AppTheme.primaryDark,
+                ),
+                title: const Text(
+                  'Choose from Gallery',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickImage(ImageSource.gallery);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _save() async {
     setState(() => _errorMessage = null);
 
     if (!_formKey.currentState!.validate()) return;
 
     final name = _nameController.text.trim();
-    final priceCentavos = parsePesoStringToCentavos(_priceController.text);
-    final capitalCentavos = parsePesoStringToCentavos(_capitalController.text);
-
-    if (priceCentavos == null || priceCentavos <= 0) {
-      setState(() => _errorMessage = 'Price must be greater than P0.00');
+    final nameErr = ProductValidator.validateName(name);
+    if (nameErr != null) {
+      setState(() => _errorMessage = nameErr);
       return;
     }
-    if (capitalCentavos == null || capitalCentavos <= 0) {
-      setState(() => _errorMessage = 'Capital must be greater than P0.00');
+
+    final priceCentavos = parsePesoStringToCentavos(_priceController.text);
+    final priceErr = ProductValidator.validatePriceCentavos(priceCentavos);
+    if (priceErr != null) {
+      setState(() => _errorMessage = priceErr);
+      return;
+    }
+
+    final capitalCentavos = parsePesoStringToCentavos(_capitalController.text);
+    final capitalErr = ProductValidator.validateCapitalCentavos(
+      capitalCentavos,
+    );
+    if (capitalErr != null) {
+      setState(() => _errorMessage = capitalErr);
       return;
     }
 
@@ -85,17 +161,22 @@ class _ProductFormDialogState extends ConsumerState<ProductFormDialog> {
 
     try {
       if (isEditing) {
+        final pId = widget.productToEdit!.id;
         await repo.updateProduct(
-          id: widget.productToEdit!.id,
+          id: pId,
           name: name,
-          defaultPriceCentavos: priceCentavos,
-          capitalCentavos: capitalCentavos,
+          defaultPriceCentavos: priceCentavos!,
+          capitalCentavos: capitalCentavos!,
+          imagePath: _imagePath,
+          updateImage: _imageChanged,
         );
+        ref.invalidate(capitalHistoryProvider(pId));
       } else {
-        await repo.addProduct(
+        await repo.createProduct(
           name: name,
-          defaultPriceCentavos: priceCentavos,
-          capitalCentavos: capitalCentavos,
+          defaultPriceCentavos: priceCentavos!,
+          capitalCentavos: capitalCentavos!,
+          imagePath: _imagePath,
         );
       }
 
@@ -187,6 +268,96 @@ class _ProductFormDialogState extends ConsumerState<ProductFormDialog> {
                 ),
                 const SizedBox(height: 16),
               ],
+
+              // Product Picture Selector
+              Center(
+                child: _imagePath != null
+                    ? Column(
+                        children: [
+                          ProductImageWidget(
+                            imagePath: _imagePath,
+                            width: 130,
+                            height: 130,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              TextButton.icon(
+                                icon: const Icon(
+                                  Icons.photo_camera_outlined,
+                                  size: 18,
+                                ),
+                                label: const Text('Change Photo'),
+                                onPressed: _showImagePickerOptions,
+                              ),
+                              TextButton.icon(
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  size: 18,
+                                  color: AppTheme.accentRed,
+                                ),
+                                label: const Text(
+                                  'Remove',
+                                  style: TextStyle(color: AppTheme.accentRed),
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _imagePath = null;
+                                    _imageChanged = true;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        ],
+                      )
+                    : InkWell(
+                        onTap: _showImagePickerOptions,
+                        borderRadius: BorderRadius.circular(16),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 20),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.shade50.withValues(alpha: 0.6),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.amber.shade300,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.add_a_photo_outlined,
+                                size: 36,
+                                color: Colors.amber.shade900,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Add Banana Photo',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.amber.shade900,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Take a photo or choose from gallery',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+              ),
+              const SizedBox(height: 16),
 
               // Product Name
               TextFormField(

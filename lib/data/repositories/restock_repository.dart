@@ -49,7 +49,42 @@ class RestockRepository {
   }
 
   /// Deletes a restock purchase entry by ID.
+  /// Throws [StateError] if the purchase belongs to a date whose payout is locked.
   Future<void> deleteRestockPurchase(int id) async {
+    final purchase = await (_db.select(
+      _db.restockPurchases,
+    )..where((r) => r.id.equals(id))).getSingleOrNull();
+    if (purchase == null) return;
+
+    final start = DateTime(
+      purchase.date.year,
+      purchase.date.month,
+      purchase.date.day,
+    );
+    final end = DateTime(
+      purchase.date.year,
+      purchase.date.month,
+      purchase.date.day,
+      23,
+      59,
+      59,
+      999,
+    );
+    final lockedPayout =
+        await (_db.select(_db.payouts)..where(
+              (p) =>
+                  p.date.isBiggerOrEqualValue(start) &
+                  p.date.isSmallerOrEqualValue(end) &
+                  p.locked.equals(true),
+            ))
+            .getSingleOrNull();
+
+    if (lockedPayout != null) {
+      throw StateError(
+        'Cannot delete restock purchase for locked day ${purchase.date}',
+      );
+    }
+
     await (_db.delete(
       _db.restockPurchases,
     )..where((r) => r.id.equals(id))).go();

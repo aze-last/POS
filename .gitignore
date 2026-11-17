@@ -59,4 +59,14 @@ key.properties
 # Build & release artifacts
 releases/
 
+# Local environment & Supabase sync credentials
+# `.env` may hold the project URL and public key. Never commit it.
+.env
+.env.*
+!.env.example
+
+# Supabase CLI local state
+supabase/.branches/
+supabase/.temp/
+
 

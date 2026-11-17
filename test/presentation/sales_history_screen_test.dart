@@ -268,23 +268,311 @@ void main() {
         await tester.tap(find.text('Void This Sale'));
         await tester.pumpAndSettle();
 
-        // Locked dialog is presented
-        expect(find.text('Day Payout Locked'), findsOneWidget);
-        expect(find.text('Reopen Day'), findsOneWidget);
-
-        // Tap Reopen Day
-        await tester.tap(find.text('Reopen Day'));
-        await tester.pumpAndSettle();
-
-        // Now void confirmation dialog is displayed
+        // Void confirmation dialog is displayed with Reopen notice
         expect(find.text('Void Sale #1?'), findsOneWidget);
+        expect(
+          find.text(
+            'Notice: This day payout is locked. Confirming this void will unlock and reopen the day.',
+          ),
+          findsOneWidget,
+        );
 
-        // Confirm void
-        await tester.tap(find.widgetWithText(ElevatedButton, 'Void Sale'));
+        // Confirm Reopen & Void
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Reopen & Void'));
         await tester.pumpAndSettle();
 
         // Verified: sale is now voided
         expect(find.text('VOIDED'), findsOneWidget);
+
+        await cleanUpWidget(tester);
+      },
+    );
+
+    test(
+      'editSale rewrites items atomically and updates exact total and profit',
+      () async {
+        final now = DateTime.now();
+        final saleResult = await saleRepo.completeSale(
+          lines: [
+            SaleLineInput(
+              productId: 1,
+              productName: 'Cardava',
+              weight: Weight.fromGrams(1000),
+              pricePerKgCentavos: 2500,
+              capitalPerKgCentavos: 1800,
+            ),
+          ],
+          chargedCentavos: 2500,
+          paidCentavos: 3000,
+          createdAt: now,
+        );
+
+        expect(saleResult.sale.exactTotalCentavos, equals(2500));
+        expect(saleResult.items.length, equals(1));
+
+        // Edit sale to 2000g at P25.00/kg (5000 centavos)
+        final editedResult = await saleRepo.editSale(
+          saleId: saleResult.sale.id,
+          newLines: [
+            SaleLineInput(
+              productId: 1,
+              productName: 'Cardava',
+              weight: Weight.fromGrams(2000),
+              pricePerKgCentavos: 2500,
+              capitalPerKgCentavos: 1800,
+            ),
+          ],
+          chargedCentavos: 5000,
+          paidCentavos: 5000,
+        );
+
+        expect(editedResult.sale.exactTotalCentavos, equals(5000));
+        expect(editedResult.sale.chargedCentavos, equals(5000));
+        expect(editedResult.items.length, equals(1));
+        expect(editedResult.items.first.grams, equals(2000));
+
+        // Check with details
+        final details = await saleRepo.getSalesWithDetails();
+        expect(
+          details.first.profitCentavos,
+          equals(5000 - 3600),
+        ); // 1400 centavos
+      },
+    );
+
+    testWidgets(
+      'shows Edited badge on edited sales and tapping it displays before/after audit history',
+      (tester) async {
+        final now = DateTime.now();
+        final saleResult = await saleRepo.completeSale(
+          lines: [
+            SaleLineInput(
+              productId: 1,
+              productName: 'Cardava',
+              weight: Weight.fromGrams(1000),
+              pricePerKgCentavos: 3000,
+              capitalPerKgCentavos: 2000,
+            ),
+          ],
+          chargedCentavos: 3000,
+          paidCentavos: 3000,
+          createdAt: now,
+        );
+
+        // Perform an edit
+        await saleRepo.editSale(
+          saleId: saleResult.sale.id,
+          newLines: [
+            SaleLineInput(
+              originalItemId: saleResult.items.single.id,
+              productId: 1,
+              productName: 'Cardava',
+              weight: Weight.fromGrams(1500),
+              pricePerKgCentavos: 3000,
+              capitalPerKgCentavos: 2000,
+            ),
+          ],
+          chargedCentavos: 4500,
+          paidCentavos: 5000,
+          reason: 'Added half kilo',
+        );
+
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pumpAndSettle();
+
+        // "Edited" badge should be visible on the card
+        expect(find.text('Edited'), findsWidgets);
+
+        // Tap the Edited badge to open SaleEditHistoryDialog
+        await tester.tap(find.text('Edited').first);
+        await tester.pumpAndSettle();
+
+        // Audit modal dialog must display
+        expect(
+          find.text('Edit History: Sale #${saleResult.sale.id}'),
+          findsOneWidget,
+        );
+        expect(find.text('Reason: Added half kilo'), findsOneWidget);
+        expect(find.text('Before'), findsOneWidget);
+        expect(find.text('After'), findsOneWidget);
+
+        await cleanUpWidget(tester);
+      },
+    );
+
+    testWidgets(
+      'edit on locked day is blocked with "This day is paid out. Reopen it first." dialog',
+      (tester) async {
+        final now = DateTime.now();
+        final saleResult = await saleRepo.completeSale(
+          lines: [
+            SaleLineInput(
+              productId: 1,
+              productName: 'Cardava',
+              weight: Weight.fromGrams(1000),
+              pricePerKgCentavos: 3000,
+              capitalPerKgCentavos: 2000,
+            ),
+          ],
+          chargedCentavos: 3000,
+          paidCentavos: 3000,
+          createdAt: now,
+        );
+
+        // Lock the day
+        await db
+            .into(db.payouts)
+            .insert(
+              PayoutsCompanion.insert(
+                date: DateTime(now.year, now.month, now.day),
+                toParentsCentavos: 2000,
+                salaryCentavos: 500,
+                reserveCentavos: 500,
+                locked: const Value(true),
+              ),
+            );
+
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pumpAndSettle();
+
+        // Tap the Edit button on the card
+        await tester.tap(find.text('Edit').first);
+        await tester.pumpAndSettle();
+
+        // Guard dialog appears
+        expect(find.text('Day Payout Locked'), findsOneWidget);
+        expect(
+          find.text('This day is paid out. Reopen it first.'),
+          findsOneWidget,
+        );
+        expect(find.text('Reopen Day'), findsOneWidget);
+
+        // Tap Reopen Day
+        await tester.tap(find.widgetWithText(FilledButton, 'Reopen Day'));
+        await tester.pumpAndSettle();
+
+        // Verified: day is unlocked and EditSaleDialog opened
+        expect(await saleRepo.isDayLocked(now), isFalse);
+        expect(find.text('Edit Sale #${saleResult.sale.id}'), findsOneWidget);
+
+        await cleanUpWidget(tester);
+      },
+    );
+
+    testWidgets(
+      'shows Edited badge on edited sales and tapping it displays before/after audit history',
+      (tester) async {
+        final now = DateTime.now();
+        final saleResult = await saleRepo.completeSale(
+          lines: [
+            SaleLineInput(
+              productId: 1,
+              productName: 'Cardava',
+              weight: Weight.fromGrams(1000),
+              pricePerKgCentavos: 3000,
+              capitalPerKgCentavos: 2000,
+            ),
+          ],
+          chargedCentavos: 3000,
+          paidCentavos: 3000,
+          createdAt: now,
+        );
+
+        // Perform an edit
+        await saleRepo.editSale(
+          saleId: saleResult.sale.id,
+          newLines: [
+            SaleLineInput(
+              originalItemId: saleResult.items.single.id,
+              productId: 1,
+              productName: 'Cardava',
+              weight: Weight.fromGrams(1500),
+              pricePerKgCentavos: 3000,
+              capitalPerKgCentavos: 2000,
+            ),
+          ],
+          chargedCentavos: 4500,
+          paidCentavos: 5000,
+          reason: 'Added half kilo',
+        );
+
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pumpAndSettle();
+
+        // "Edited" badge should be visible on the card
+        expect(find.text('Edited'), findsWidgets);
+
+        // Tap the Edited badge to open SaleEditHistoryDialog
+        await tester.tap(find.text('Edited').first);
+        await tester.pumpAndSettle();
+
+        // Audit modal dialog must display
+        expect(
+          find.text('Edit History: Sale #${saleResult.sale.id}'),
+          findsOneWidget,
+        );
+        expect(find.text('Reason: Added half kilo'), findsOneWidget);
+        expect(find.text('Before'), findsOneWidget);
+        expect(find.text('After'), findsOneWidget);
+
+        await cleanUpWidget(tester);
+      },
+    );
+
+    testWidgets(
+      'edit on locked day is blocked with "This day is paid out. Reopen it first." dialog',
+      (tester) async {
+        final now = DateTime.now();
+        final saleResult = await saleRepo.completeSale(
+          lines: [
+            SaleLineInput(
+              productId: 1,
+              productName: 'Cardava',
+              weight: Weight.fromGrams(1000),
+              pricePerKgCentavos: 3000,
+              capitalPerKgCentavos: 2000,
+            ),
+          ],
+          chargedCentavos: 3000,
+          paidCentavos: 3000,
+          createdAt: now,
+        );
+
+        // Lock the day
+        await db
+            .into(db.payouts)
+            .insert(
+              PayoutsCompanion.insert(
+                date: DateTime(now.year, now.month, now.day),
+                toParentsCentavos: 2000,
+                salaryCentavos: 500,
+                reserveCentavos: 500,
+                locked: const Value(true),
+              ),
+            );
+
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pumpAndSettle();
+
+        // Tap the Edit button on the card
+        await tester.tap(find.text('Edit').first);
+        await tester.pumpAndSettle();
+
+        // Guard dialog appears
+        expect(find.text('Day Payout Locked'), findsOneWidget);
+        expect(
+          find.text('This day is paid out. Reopen it first.'),
+          findsOneWidget,
+        );
+        expect(find.text('Reopen Day'), findsOneWidget);
+
+        // Tap Reopen Day
+        await tester.tap(find.widgetWithText(FilledButton, 'Reopen Day'));
+        await tester.pumpAndSettle();
+
+        // Verified: day is unlocked and EditSaleDialog opened
+        expect(await saleRepo.isDayLocked(now), isFalse);
+        expect(find.text('Edit Sale #${saleResult.sale.id}'), findsOneWidget);
 
         await cleanUpWidget(tester);
       },

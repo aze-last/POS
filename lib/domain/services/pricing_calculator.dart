@@ -1,3 +1,5 @@
+import '../models/money.dart';
+
 /// Handles all pricing, rounding, and discount allocations for Banana POS.
 ///
 /// Guaranteed pure Dart and 100% integer arithmetic (zero floating-point).
@@ -11,17 +13,27 @@ class PricingCalculator {
     if (grams <= 0) {
       throw ArgumentError.value(grams, 'grams', 'grams must be greater than 0');
     }
-    if (pricePerKgCentavos < 0) {
+    if (pricePerKgCentavos <= 0) {
       throw ArgumentError.value(
         pricePerKgCentavos,
         'pricePerKgCentavos',
-        'price per kg cannot be negative',
+        'price per kg must be greater than 0',
       );
     }
 
     final product = pricePerKgCentavos * grams;
     // Integer round-half-up division by 1000
     return (product + 500) ~/ 1000;
+  }
+
+  /// Computes line value wrapped in strongly typed [Money].
+  static Money computeLineMoney({
+    required int grams,
+    required int pricePerKgCentavos,
+  }) {
+    return Money(
+      computeLineValue(grams: grams, pricePerKgCentavos: pricePerKgCentavos),
+    );
   }
 
   /// Computes line capital cost in centavos using the snapshotted capital per kg.
