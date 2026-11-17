@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -46,18 +47,36 @@ class ProductImageWidget extends StatelessWidget {
       return _buildPlaceholder();
     }
 
-    final file = File(path);
-    if (!file.existsSync()) {
-      return _buildPlaceholder();
-    }
+    Widget image;
 
-    Widget image = Image.file(
-      file,
-      width: width,
-      height: height,
-      fit: fit,
-      errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
-    );
+    if (path.startsWith('data:image/')) {
+      try {
+        final commaIdx = path.indexOf(',');
+        final base64Data = commaIdx != -1 ? path.substring(commaIdx + 1) : path;
+        final bytes = base64Decode(base64Data);
+        image = Image.memory(
+          bytes,
+          width: width,
+          height: height,
+          fit: fit,
+          errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
+        );
+      } catch (_) {
+        return _buildPlaceholder();
+      }
+    } else {
+      final file = File(path);
+      if (!file.existsSync()) {
+        return _buildPlaceholder();
+      }
+      image = Image.file(
+        file,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
+      );
+    }
 
     if (borderRadius != null) {
       image = ClipRRect(borderRadius: borderRadius!, child: image);

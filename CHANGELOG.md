@@ -1,3 +1,7 @@
+## [v1.0.5] - 2026-11-17
+
+Enable multi-device product photo syncing across paired phones with local offline caching
+
 ## [v1.0.4] - 2026-11-17
 
 Add product variety deletion in edit dialog and catalog, auto-sync for catalog updates, and offline-first cloud sync engine

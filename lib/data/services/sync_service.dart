@@ -1,7 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p_path;
+import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -272,6 +275,44 @@ class SyncService {
         ),
       );
     }
+
+    // Ensure products with local images get pushed to cloud with photo data
+    final prodsWithImages = await (_db.select(
+      _db.products,
+    )..where((tbl) => tbl.imagePath.isNotNull())).get();
+    for (final p in prodsWithImages) {
+      if (p.imagePath != null && !p.imagePath!.startsWith('data:image/')) {
+        try {
+          final file = File(p.imagePath!);
+          if (file.existsSync()) {
+            await (_db.update(
+              _db.products,
+            )..where((tbl) => tbl.id.equals(p.id))).write(
+              ProductsCompanion(updatedAt: Value(DateTime.now().toUtc())),
+            );
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  Future<Directory> _getImagesDirectory() async {
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final dir = Directory(p_path.join(appDir.path, 'product_images'));
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      return dir;
+    } catch (_) {
+      final tempDir = Directory(
+        p_path.join(Directory.systemTemp.path, 'banana_pos_product_images'),
+      );
+      if (!await tempDir.exists()) {
+        await tempDir.create(recursive: true);
+      }
+      return tempDir;
+    }
   }
 
   /// Pushes all modified local records across all tables to Supabase.
@@ -291,22 +332,39 @@ class SyncService {
               )
               .toList();
     if (prodsToPush.isNotEmpty) {
-      final payload = prodsToPush
-          .map(
-            (p) => {
-              'id': p.syncId,
-              'name': p.name,
-              'default_price_centavos': p.defaultPriceCentavos,
-              'capital_centavos': p.capitalCentavos,
-              'sort_order': p.sortOrder,
-              'archived': p.archived,
-              'image_path': p.imagePath,
-              'updated_at': (p.updatedAt ?? DateTime.now().toUtc())
-                  .toIso8601String(),
-              'deleted_at': p.deletedAt?.toUtc().toIso8601String(),
-            },
-          )
-          .toList();
+      final payload = <Map<String, dynamic>>[];
+      for (final p in prodsToPush) {
+        String? syncedImagePath;
+        if (p.imagePath != null && p.imagePath!.isNotEmpty) {
+          if (p.imagePath!.startsWith('data:image/')) {
+            syncedImagePath = p.imagePath;
+          } else {
+            try {
+              final file = File(p.imagePath!);
+              if (await file.exists()) {
+                final bytes = await file.readAsBytes();
+                syncedImagePath =
+                    'data:image/jpeg;base64,${base64Encode(bytes)}';
+              }
+            } catch (_) {
+              syncedImagePath = null;
+            }
+          }
+        }
+
+        payload.add({
+          'id': p.syncId,
+          'name': p.name,
+          'default_price_centavos': p.defaultPriceCentavos,
+          'capital_centavos': p.capitalCentavos,
+          'sort_order': p.sortOrder,
+          'archived': p.archived,
+          'image_path': syncedImagePath,
+          'updated_at': (p.updatedAt ?? DateTime.now().toUtc())
+              .toIso8601String(),
+          'deleted_at': p.deletedAt?.toUtc().toIso8601String(),
+        });
+      }
       await client.from('products').upsert(payload).timeout(timeout);
     }
 
@@ -597,6 +655,60 @@ class SyncService {
           ? DateTime.parse(p['deleted_at'] as String)
           : null;
 
+      String? resolvedImagePath;
+      final remoteImagePath = p['image_path'] as String?;
+
+      if (remoteImagePath != null && remoteImagePath.isNotEmpty) {
+        if (remoteImagePath.startsWith('data:image/')) {
+          try {
+            final commaIdx = remoteImagePath.indexOf(',');
+            final base64Data = commaIdx != -1
+                ? remoteImagePath.substring(commaIdx + 1)
+                : remoteImagePath;
+            final imageBytes = base64Decode(base64Data);
+
+            final imagesDir = await _getImagesDirectory();
+            final targetFilePath = p_path.join(
+              imagesDir.path,
+              'product_$remoteSyncId.jpg',
+            );
+            final targetFile = File(targetFilePath);
+
+            if (!await targetFile.exists() ||
+                await targetFile.length() != imageBytes.length) {
+              await targetFile.writeAsBytes(imageBytes, flush: true);
+            }
+            resolvedImagePath = targetFilePath;
+          } catch (_) {
+            resolvedImagePath = existing?.imagePath;
+          }
+        } else {
+          try {
+            if (File(remoteImagePath).existsSync()) {
+              resolvedImagePath = remoteImagePath;
+            } else {
+              resolvedImagePath = null;
+            }
+          } catch (_) {
+            resolvedImagePath = null;
+          }
+        }
+      } else {
+        resolvedImagePath = null;
+      }
+
+      // Clean up old file if photo was removed or replaced
+      if (existing != null &&
+          existing.imagePath != null &&
+          existing.imagePath != resolvedImagePath) {
+        try {
+          final oldFile = File(existing.imagePath!);
+          if (await oldFile.exists()) {
+            await oldFile.delete();
+          }
+        } catch (_) {}
+      }
+
       if (existing != null) {
         await (_db.update(
           _db.products,
@@ -607,7 +719,7 @@ class SyncService {
             capitalCentavos: Value(p['capital_centavos'] as int),
             sortOrder: Value(p['sort_order'] as int? ?? 0),
             archived: Value(p['archived'] as bool? ?? false),
-            imagePath: Value(p['image_path'] as String?),
+            imagePath: Value(resolvedImagePath),
             updatedAt: Value(updatedAt),
             deletedAt: Value(deletedAt),
           ),
@@ -623,7 +735,7 @@ class SyncService {
                 capitalCentavos: p['capital_centavos'] as int,
                 sortOrder: Value(p['sort_order'] as int? ?? 0),
                 archived: Value(p['archived'] as bool? ?? false),
-                imagePath: Value(p['image_path'] as String?),
+                imagePath: Value(resolvedImagePath),
                 updatedAt: Value(updatedAt),
                 deletedAt: Value(deletedAt),
               ),

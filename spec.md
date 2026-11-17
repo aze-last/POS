@@ -76,6 +76,7 @@ settings(salary_mode, salary_percent_basis_points, fixed_daily_salary_centavos)
 - Add, edit, archive, restore, drag-reorder, and delete variety (prominent "Delete Variety" in edit dialog; permanent delete for unreferenced items in archived tab).
 - Fields: name (unique among active), default price/kg, capital/kg, optional product photo (camera capture or gallery pick, compressed and saved to local app documents directory).
 - Product photo thumbnail displayed in active catalog and archived lists.
+- Multi-device photo sync: Product photos synchronize across devices via the sync engine (compact compressed JPEG bytes decoded and cached into local storage on receiving devices, ensuring photos are 100% offline-available on all paired phones).
 - Capital is shown prominently in the list: "Capital: P__/kg".
 - Capital edits write a capital_history row. Per-product history view. Latest = active.
 - Confirm before archive.
