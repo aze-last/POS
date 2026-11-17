@@ -66,5 +66,93 @@ void main() {
       final result = await syncService.sync();
       expect(result.status, equals(SyncStatus.disabled));
     });
+
+    test('backfills missing syncIds across all local tables', () async {
+      // Seed starter product and settings
+      final prod = await db
+          .into(db.products)
+          .insertReturning(
+            ProductsCompanion.insert(
+              name: 'Cardava',
+              defaultPriceCentavos: 3000,
+              capitalCentavos: 2000,
+            ),
+          );
+      final sale = await db
+          .into(db.sales)
+          .insertReturning(
+            SalesCompanion.insert(
+              createdAt: DateTime.now(),
+              exactTotalCentavos: 3000,
+              chargedCentavos: 3000,
+              paidCentavos: 3000,
+              changeCentavos: 0,
+            ),
+          );
+      await db
+          .into(db.saleItems)
+          .insert(
+            SaleItemsCompanion.insert(
+              saleId: sale.id,
+              productId: prod.id,
+              productNameSnapshot: 'Cardava',
+              grams: 1000,
+              pricePerKgCentavos: 3000,
+              capitalPerKgCentavos: 2000,
+            ),
+          );
+      await db
+          .into(db.expenses)
+          .insert(
+            ExpensesCompanion.insert(
+              date: DateTime.now(),
+              type: 'other',
+              amountCentavos: 5000,
+            ),
+          );
+      await db
+          .into(db.restockPurchases)
+          .insert(
+            RestockPurchasesCompanion.insert(
+              date: DateTime.now(),
+              amountCentavos: 10000,
+            ),
+          );
+      await db
+          .into(db.payouts)
+          .insert(
+            PayoutsCompanion.insert(
+              date: DateTime.now(),
+              toParentsCentavos: 5000,
+              salaryCentavos: 2000,
+              reserveCentavos: 1000,
+            ),
+          );
+      await db.into(db.settings).insert(SettingsCompanion.insert());
+
+      // Verify all tables currently have null syncIds
+      expect(prod.syncId, isNull);
+      expect(sale.syncId, isNull);
+
+      // Trigger backfill
+      await syncService.backfillMissingSyncIds();
+
+      // Verify syncIds are now populated
+      final updatedProds = await db.select(db.products).get();
+      final updatedSales = await db.select(db.sales).get();
+      final updatedItems = await db.select(db.saleItems).get();
+      final updatedExpenses = await db.select(db.expenses).get();
+      final updatedRestocks = await db.select(db.restockPurchases).get();
+      final updatedPayouts = await db.select(db.payouts).get();
+      final updatedSettings = await db.select(db.settings).get();
+
+      expect(updatedProds.first.syncId, isNotNull);
+      expect(updatedSales.first.syncId, isNotNull);
+      expect(updatedItems.first.syncId, isNotNull);
+      expect(updatedExpenses.first.syncId, isNotNull);
+      expect(updatedRestocks.first.syncId, isNotNull);
+      expect(updatedPayouts.first.syncId, isNotNull);
+      expect(updatedSettings.first.syncId, isNotNull);
+    });
   });
 }

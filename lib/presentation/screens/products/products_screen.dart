@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/database/app_database.dart';
 import '../../../domain/utils/formatters.dart';
 import '../../providers/product_providers.dart';
+import '../../providers/sync_providers.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/product_image_widget.dart';
 import 'capital_history_sheet.dart';
@@ -56,6 +57,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
     if (confirmed == true) {
       final repo = ref.read(productRepositoryProvider);
       await repo.archiveProduct(product.id);
+      ref.read(syncStateProvider.notifier).triggerAutoSync();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -65,6 +67,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
             onPressed: () async {
               try {
                 await repo.restoreProduct(product.id);
+                ref.read(syncStateProvider.notifier).triggerAutoSync();
               } catch (e) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -86,6 +89,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
     try {
       final repo = ref.read(productRepositoryProvider);
       await repo.restoreProduct(product.id);
+      ref.read(syncStateProvider.notifier).triggerAutoSync();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${product.name} restored to active catalog')),
@@ -99,6 +103,64 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
             e.toString().replaceFirst('ProductValidationException: ', ''),
           ),
         ),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteArchived(Product product) async {
+    final repo = ref.read(productRepositoryProvider);
+    final hasSales = await repo.hasSalesOrExpenses(product.id);
+    if (!mounted) return;
+
+    if (hasSales) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Cannot Delete ${product.name}'),
+          content: Text(
+            '${product.name} has sales or expenses recorded in your history. It is kept archived so your financial reports and receipts remain accurate.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete ${product.name}?'),
+        content: Text(
+          'Are you sure you want to permanently delete ${product.name}? It has no sales history and will be completely removed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.dangerColor,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete Permanently'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await repo.deleteProduct(product.id);
+      ref.read(syncStateProvider.notifier).triggerAutoSync();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${product.name} permanently deleted')),
       );
     }
   }
@@ -341,8 +403,8 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
                       ),
                       IconButton(
                         icon: const Icon(
-                          Icons.archive_outlined,
-                          color: AppTheme.textSecondary,
+                          Icons.delete_outline,
+                          color: AppTheme.dangerColor,
                         ),
                         tooltip: 'Archive',
                         onPressed: () => _confirmArchive(product),
@@ -399,10 +461,23 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
                   'Capital: ${formatMoney(product.capitalCentavos)}/kg · Sell: ${formatMoney(product.defaultPriceCentavos)}/kg',
                   style: const TextStyle(fontSize: 13),
                 ),
-                trailing: TextButton.icon(
-                  icon: const Icon(Icons.unarchive_outlined),
-                  label: const Text('Restore'),
-                  onPressed: () => _restoreProduct(product),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextButton.icon(
+                      icon: const Icon(Icons.unarchive_outlined),
+                      label: const Text('Restore'),
+                      onPressed: () => _restoreProduct(product),
+                    ),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.delete_forever_outlined,
+                        color: AppTheme.dangerColor,
+                      ),
+                      tooltip: 'Delete Permanently',
+                      onPressed: () => _confirmDeleteArchived(product),
+                    ),
+                  ],
                 ),
               ),
             );

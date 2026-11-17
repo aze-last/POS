@@ -53,7 +53,7 @@ payouts(id, date, to_parents_centavos, salary_centavos, reserve_centavos, locked
 settings(salary_mode, salary_percent_basis_points, fixed_daily_salary_centavos)
 ```
 
-- Archive products, never hard-delete them (old sales must stay intact).
+- Products with sales or expenses are soft-archived (never hard-deleted) to protect historical sales and audit trails. Products with zero sales and zero expenses (e.g. unneeded seeded starter varieties) may be permanently deleted.
 - Every sale item SNAPSHOTS price and capital at sale time. Past profit is never recomputed from current capital.
 - Sale edits: `sale_edits` is an immutable, append-only audit trail recording `before_json` and `after_json` for header and all lines in integer centavos and grams. No UI path can delete edit history.
 - Line unchanged in product on edit KEEPS its original `capital_per_kg_centavos` snapshot. Lines with a changed product or newly added lines snapshot CURRENT catalog capital.
@@ -73,7 +73,7 @@ settings(salary_mode, salary_percent_basis_points, fixed_daily_salary_centavos)
 - Cart survives app backgrounding (persist draft cart locally).
 
 ### 5.2 Products (full CRUD)
-- Add, edit, archive, restore, drag-reorder.
+- Add, edit, archive, restore, drag-reorder, and delete variety (prominent "Delete Variety" in edit dialog; permanent delete for unreferenced items in archived tab).
 - Fields: name (unique among active), default price/kg, capital/kg, optional product photo (camera capture or gallery pick, compressed and saved to local app documents directory).
 - Product photo thumbnail displayed in active catalog and archived lists.
 - Capital is shown prominently in the list: "Capital: P__/kg".

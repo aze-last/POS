@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../data/services/sync_service.dart';
 import '../../../domain/utils/formatters.dart';
 import '../../providers/backup_providers.dart';
 import '../../providers/cart_provider.dart';
 import '../../providers/product_providers.dart';
+import '../../providers/sync_providers.dart';
+import '../../providers/update_providers.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/product_image_widget.dart';
 import '../expenses/expenses_screen.dart';
@@ -14,7 +17,6 @@ import '../sales/sales_history_screen.dart';
 import '../settings/settings_screen.dart';
 import '../settings/update_dialog.dart';
 import '../summary/daily_summary_screen.dart';
-import '../../providers/update_providers.dart';
 import 'cart_sheet.dart';
 import 'weighing_bottom_sheet.dart';
 
@@ -49,6 +51,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     final activeProductsAsync = ref.watch(activeProductsProvider);
     final cart = ref.watch(cartProvider);
     final updateAsync = ref.watch(availableUpdateProvider);
+    final syncState = ref.watch(syncStateProvider);
 
     // Update notification handling:
     // Never interrupt a sale. If cart is not empty, show dismissible banner instead of modal.
@@ -77,6 +80,32 @@ class _PosScreenState extends ConsumerState<PosScreen> {
           ],
         ),
         actions: [
+          if (syncState.isConfigured)
+            IconButton(
+              icon: syncState.status == SyncStatus.syncing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(
+                      syncState.status == SyncStatus.error
+                          ? Icons.cloud_off_outlined
+                          : Icons.cloud_done_outlined,
+                      size: 22,
+                      color: syncState.status == SyncStatus.error
+                          ? Colors.grey
+                          : AppTheme.primaryDark,
+                    ),
+              tooltip: syncState.status == SyncStatus.syncing
+                  ? 'Syncing with cloud...'
+                  : syncState.status == SyncStatus.error
+                  ? 'Offline · Data saved locally'
+                  : 'Connected · Auto-sync active',
+              onPressed: () {
+                ref.read(syncStateProvider.notifier).syncSilently();
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.assessment_outlined),
             tooltip: 'Daily Summary',

@@ -206,5 +206,74 @@ void main() {
 
       await cleanUpWidget(tester);
     });
+
+    testWidgets('deletes an unreferenced variety from edit dialog', (
+      tester,
+    ) async {
+      await tester.pumpWidget(buildTestWidget());
+      await tester.pumpAndSettle();
+
+      // Tap Mundo to edit
+      await tester.tap(find.text('Mundo'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Edit Banana Variety'), findsOneWidget);
+      expect(find.text('Delete Variety'), findsOneWidget);
+
+      // Tap Delete Variety
+      await tester.tap(find.text('Delete Variety'));
+      await tester.pumpAndSettle();
+
+      // Verify confirmation dialog
+      expect(find.text('Delete Mundo?'), findsOneWidget);
+      final confirmDelete = find.widgetWithText(ElevatedButton, 'Delete');
+      await tester.tap(confirmDelete);
+      await tester.pumpAndSettle();
+
+      // Mundo should be completely gone from active tab
+      expect(find.text('Mundo'), findsNothing);
+      expect(find.text('Active (5)'), findsOneWidget);
+
+      await cleanUpWidget(tester);
+    });
+
+    testWidgets(
+      'permanently deletes an unreferenced variety from archived tab',
+      (tester) async {
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pumpAndSettle();
+
+        // Archive Mundo first
+        final archiveButtons = find.byTooltip('Archive');
+        await tester.tap(archiveButtons.first);
+        await tester.pumpAndSettle();
+
+        final confirmBtn = find.widgetWithText(ElevatedButton, 'Archive');
+        await tester.tap(confirmBtn);
+        await tester.pumpAndSettle();
+
+        // Switch to Archived tab
+        await tester.tap(find.text('Archived (1)'));
+        await tester.pumpAndSettle();
+
+        // Tap permanent delete button
+        final deleteForever = find.byTooltip('Delete Permanently');
+        expect(deleteForever, findsOneWidget);
+        await tester.tap(deleteForever);
+        await tester.pumpAndSettle();
+
+        // Confirm permanent delete
+        expect(find.text('Delete Permanently'), findsOneWidget);
+        await tester.tap(
+          find.widgetWithText(ElevatedButton, 'Delete Permanently'),
+        );
+        await tester.pumpAndSettle();
+
+        // Verify archived tab is now empty
+        expect(find.text('Archived (0)'), findsOneWidget);
+
+        await cleanUpWidget(tester);
+      },
+    );
   });
 }

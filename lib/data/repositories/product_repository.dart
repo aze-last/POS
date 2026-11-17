@@ -111,6 +111,7 @@ class ProductRepository {
             sortOrder: Value(nextSortOrder),
             archived: const Value(false),
             imagePath: Value(imagePath),
+            updatedAt: Value(DateTime.now().toUtc()),
           ),
         );
 
@@ -175,6 +176,7 @@ class ProductRepository {
           defaultPriceCentavos: Value(defaultPriceCentavos),
           capitalCentavos: Value(capitalCentavos),
           imagePath: updateImage ? Value(imagePath) : const Value.absent(),
+          updatedAt: Value(DateTime.now().toUtc()),
         ),
       );
     });
@@ -182,10 +184,14 @@ class ProductRepository {
     return (await getProductById(id))!;
   }
 
-  /// Soft-archives product (never hard-deletes).
+  /// Soft-archives product to hide it from the active POS screen while preserving sales history.
   Future<void> archiveProduct(int id) async {
     await (_db.update(_db.products)..where((p) => p.id.equals(id))).write(
-      const ProductsCompanion(archived: Value(true)),
+      ProductsCompanion(
+        archived: const Value(true),
+        updatedAt: Value(DateTime.now().toUtc()),
+        deletedAt: Value(DateTime.now().toUtc()),
+      ),
     );
   }
 
@@ -215,8 +221,43 @@ class ProductRepository {
       ProductsCompanion(
         archived: const Value(false),
         sortOrder: Value(nextSortOrder),
+        updatedAt: Value(DateTime.now().toUtc()),
+        deletedAt: const Value(null),
       ),
     );
+  }
+
+  /// Checks whether a product has any associated sales items or expenses.
+  Future<bool> hasSalesOrExpenses(int id) async {
+    final saleItem = await (_db.select(
+      _db.saleItems,
+    )..where((i) => i.productId.equals(id))).get();
+    if (saleItem.isNotEmpty) return true;
+    final expense = await (_db.select(
+      _db.expenses,
+    )..where((e) => e.productId.equals(id))).get();
+    return expense.isNotEmpty;
+  }
+
+  /// Deletes or archives a product from the catalog.
+  /// If the product has past sales or expenses, it is soft-archived to preserve
+  /// historical sales and financial reports.
+  /// If it has zero past sales and expenses (e.g. unneeded seeded variety),
+  /// it is completely removed.
+  Future<bool> deleteProduct(int id) async {
+    final isUsed = await hasSalesOrExpenses(id);
+    if (isUsed) {
+      await archiveProduct(id);
+      return false; // Soft-archived
+    } else {
+      await _db.transaction(() async {
+        await (_db.delete(
+          _db.capitalHistory,
+        )..where((c) => c.productId.equals(id))).go();
+        await (_db.delete(_db.products)..where((p) => p.id.equals(id))).go();
+      });
+      return true; // Permanently removed
+    }
   }
 
   /// Updates the sort_order of active products after validating the list.

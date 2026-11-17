@@ -7,6 +7,7 @@ import '../../../domain/utils/formatters.dart';
 import '../../providers/cart_provider.dart';
 import '../../providers/product_providers.dart';
 import '../../providers/sale_providers.dart';
+import '../../providers/sync_providers.dart';
 import '../../theme/app_theme.dart';
 import 'receipt_dialog.dart';
 import 'weighing_bottom_sheet.dart';
@@ -88,6 +89,9 @@ class _CartSheetState extends ConsumerState<CartSheet> {
 
       // Clear cart
       ref.read(cartProvider.notifier).clearCart();
+
+      // Trigger background auto-sync if connected
+      ref.read(syncStateProvider.notifier).triggerAutoSync();
 
       if (mounted) {
         Navigator.of(context).pop(); // Close cart sheet

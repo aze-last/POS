@@ -260,5 +260,71 @@ void main() {
         throwsA(isA<ProductValidationException>()),
       );
     });
+
+    test('deleteProduct permanently removes an unused product', () async {
+      final active = await repository.getActiveProducts();
+      final lube = active.firstWhere((p) => p.name == 'Lube');
+
+      final permanentlyDeleted = await repository.deleteProduct(lube.id);
+      expect(permanentlyDeleted, isTrue);
+
+      final updatedActive = await repository.getActiveProducts();
+      expect(updatedActive.any((p) => p.id == lube.id), isFalse);
+
+      final archived = await repository.getArchivedProducts();
+      expect(archived.any((p) => p.id == lube.id), isFalse);
+
+      // Verify row in products table is truly gone
+      final inDb = await (db.select(
+        db.products,
+      )..where((p) => p.id.equals(lube.id))).get();
+      expect(inDb, isEmpty);
+    });
+
+    test('deleteProduct soft-archives a product with existing sales', () async {
+      final active = await repository.getActiveProducts();
+      final cardava = active.firstWhere((p) => p.name == 'Cardava');
+
+      // Create a sale referencing cardava
+      final saleId = await db
+          .into(db.sales)
+          .insert(
+            SalesCompanion.insert(
+              createdAt: DateTime(2026, 1, 10),
+              exactTotalCentavos: 3250,
+              chargedCentavos: 3250,
+              paidCentavos: 5000,
+              changeCentavos: 1750,
+            ),
+          );
+      await db
+          .into(db.saleItems)
+          .insert(
+            SaleItemsCompanion.insert(
+              saleId: saleId,
+              productId: cardava.id,
+              productNameSnapshot: cardava.name,
+              grams: 1300,
+              pricePerKgCentavos: 2500,
+              capitalPerKgCentavos: cardava.capitalCentavos,
+            ),
+          );
+
+      final permanentlyDeleted = await repository.deleteProduct(cardava.id);
+      expect(permanentlyDeleted, isFalse);
+
+      final updatedActive = await repository.getActiveProducts();
+      expect(updatedActive.any((p) => p.id == cardava.id), isFalse);
+
+      final archived = await repository.getArchivedProducts();
+      expect(archived.any((p) => p.id == cardava.id), isTrue);
+
+      // Sale item remains intact
+      final item = await (db.select(
+        db.saleItems,
+      )..where((i) => i.productId.equals(cardava.id))).getSingle();
+      expect(item.productId, cardava.id);
+      expect(item.productNameSnapshot, 'Cardava');
+    });
   });
 }

@@ -7,6 +7,7 @@ import '../../../data/services/product_image_service.dart';
 import '../../../domain/models/product_validator.dart';
 import '../../../domain/utils/formatters.dart';
 import '../../providers/product_providers.dart';
+import '../../providers/sync_providers.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/product_image_widget.dart';
 
@@ -180,6 +181,9 @@ class _ProductFormDialogState extends ConsumerState<ProductFormDialog> {
         );
       }
 
+      // Trigger auto-sync so changes reach paired devices immediately
+      ref.read(syncStateProvider.notifier).triggerAutoSync();
+
       if (mounted) {
         Navigator.of(context).pop(true);
       }
@@ -193,6 +197,53 @@ class _ProductFormDialogState extends ConsumerState<ProductFormDialog> {
               .replaceFirst('Invalid argument(s): ', '');
         });
       }
+    }
+  }
+
+  Future<void> _confirmDelete() async {
+    final product = widget.productToEdit;
+    if (product == null) return;
+
+    final repo = ref.read(productRepositoryProvider);
+    final hasPastSales = await repo.hasSalesOrExpenses(product.id);
+
+    if (!mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete ${product.name}?'),
+        content: Text(
+          hasPastSales
+              ? '${product.name} will be removed from your POS screen. Past sales and profit reports will remain safe and intact.'
+              : 'Are you sure you want to delete ${product.name}? It will be removed from your catalog.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.dangerColor,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(100, 44),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await repo.deleteProduct(product.id);
+      ref.read(syncStateProvider.notifier).triggerAutoSync();
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${product.name} removed from catalog')),
+      );
     }
   }
 
@@ -451,6 +502,30 @@ class _ProductFormDialogState extends ConsumerState<ProductFormDialog> {
                       )
                     : Text(isEditing ? 'Save Changes' : 'Add to Catalog'),
               ),
+              if (isEditing) ...[
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  icon: const Icon(
+                    Icons.delete_outline,
+                    color: AppTheme.dangerColor,
+                  ),
+                  label: const Text(
+                    'Delete Variety',
+                    style: TextStyle(
+                      color: AppTheme.dangerColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(50),
+                    side: BorderSide(
+                      color: AppTheme.dangerColor.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  onPressed: _isSaving ? null : _confirmDelete,
+                ),
+              ],
             ],
           ),
         ),

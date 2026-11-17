@@ -1,3 +1,7 @@
+## [v1.0.4] - 2026-11-17
+
+Add product variety deletion in edit dialog and catalog, auto-sync for catalog updates, and offline-first cloud sync engine
+
 ## [v1.0.3] - 2026-11-17
 
 Fix SQLite migration duplicate column error on upgrade and add release-assets to security allowlist

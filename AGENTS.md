@@ -93,6 +93,7 @@ Read `spec.md` first. `spec.md` is the source of truth; update it before changin
 - 2026-11-16: Added product photo capture & upload (schema v3 with nullable imagePath, local app storage, visual POS cards, and weighing bottom sheet header).
 - 2026-11-16: Added Option A scale-style single-stream weight input with on-screen stall keypad, stream parsing, and quick chips.
 - 2026-11-16: Added inert Supabase client scaffolding for Step 9: `supabase_flutter`, validated `--dart-define` config, bootstrap that no-ops when unconfigured, and a draft RLS migration with zero policies. No sync behavior; `spec.md` §1 amendment still pending.
+- 2026-11-17: Added variety deletion in edit dialog & catalog; unreferenced items permanently deleted, referenced items soft-archived to protect historical sales integrity.
 
 ## 11. Multi-Device Supabase Sync Design Notes (Step 9)
 - `sale_edits` is append-only and syncs like other append-only tables (UUID ids).
