@@ -176,6 +176,40 @@ class ExpenseRepository {
         .watch();
   }
 
+  /// Streams expenses for an arbitrary date range.
+  Stream<List<Expense>> watchExpensesForRange(DateTime start, DateTime end) {
+    final s = _startOfDay(start);
+    final e = _endOfDay(end);
+
+    return (_db.select(_db.expenses)
+          ..where(
+            (ex) =>
+                ex.date.isBiggerOrEqualValue(s) &
+                ex.date.isSmallerOrEqualValue(e),
+          )
+          ..orderBy([
+            (ex) => OrderingTerm(expression: ex.id, mode: OrderingMode.desc),
+          ]))
+        .watch();
+  }
+
+  /// Retrieves expenses for an arbitrary date range.
+  Future<List<Expense>> getExpensesForRange(DateTime start, DateTime end) {
+    final s = _startOfDay(start);
+    final e = _endOfDay(end);
+
+    return (_db.select(_db.expenses)
+          ..where(
+            (ex) =>
+                ex.date.isBiggerOrEqualValue(s) &
+                ex.date.isSmallerOrEqualValue(e),
+          )
+          ..orderBy([
+            (ex) => OrderingTerm(expression: ex.id, mode: OrderingMode.desc),
+          ]))
+        .get();
+  }
+
   /// Computes the aggregated breakdown of spoilage vs other expenses for a day.
   Future<DailyExpenseSummary> getDailyExpenseSummary(DateTime date) async {
     final expenses = await getExpensesForDay(date);

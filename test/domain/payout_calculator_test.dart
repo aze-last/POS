@@ -144,5 +144,90 @@ void main() {
       // Reserve: 200,000 - 120,000 - 30,000 - 10,000 = 40,000
       expect(base.reserveCentavos, 40000);
     });
+
+    test(
+      'getMondayOfWeek and getSundayOfWeek properly resolve 7-day bounds',
+      () {
+        // Wednesday Nov 19, 2026
+        final wed = DateTime(2026, 11, 19, 14, 30);
+        final mon = PayoutCalculator.getMondayOfWeek(wed);
+        final sun = PayoutCalculator.getSundayOfWeek(wed);
+
+        expect(mon.year, 2026);
+        expect(mon.month, 11);
+        expect(mon.day, 16); // Monday Nov 16
+        expect(mon.weekday, DateTime.monday);
+
+        expect(sun.year, 2026);
+        expect(sun.month, 11);
+        expect(sun.day, 22); // Sunday Nov 22
+        expect(sun.weekday, DateTime.sunday);
+
+        // Edge case: Sunday itself
+        final sundayDate = DateTime(2026, 11, 22);
+        expect(PayoutCalculator.getMondayOfWeek(sundayDate).day, 16);
+        expect(PayoutCalculator.getSundayOfWeek(sundayDate).day, 22);
+
+        // Edge case: Month boundary
+        final monthBoundary = DateTime(2026, 12, 1); // Tuesday Dec 1
+        final monDec = PayoutCalculator.getMondayOfWeek(monthBoundary);
+        expect(monDec.month, 11);
+        expect(monDec.day, 30); // Monday Nov 30
+      },
+    );
+
+    test('calculateWeekly aggregates 7 days into exact weekly totals', () {
+      final mon = DateTime(2026, 11, 16);
+      final days = List.generate(7, (i) {
+        final d = DateTime(mon.year, mon.month, mon.day + i);
+        // Alternate days: 5 sales days, 2 rest days (0 sales)
+        if (i < 5) {
+          return WeeklyDaySummary(
+            date: d,
+            salesCentavos: 100000, // P1,000
+            capitalSoldCentavos: 60000, // P600
+            grossProfitCentavos: 40000, // P400
+            spoilageCentavos: 5000, // P50
+            otherExpensesCentavos: 5000, // P50
+            netProfitCentavos: 30000, // P300
+            toParentsCentavos: 65000, // P650 (600+50)
+            salaryCentavos: 9000, // P90 (30% of 300)
+            reserveCentavos: 21000, // P210
+            isLocked: i < 3, // First 3 days locked
+          );
+        } else {
+          return WeeklyDaySummary(
+            date: d,
+            salesCentavos: 0,
+            capitalSoldCentavos: 0,
+            grossProfitCentavos: 0,
+            spoilageCentavos: 0,
+            otherExpensesCentavos: 0,
+            netProfitCentavos: 0,
+            toParentsCentavos: 0,
+            salaryCentavos: 0,
+            reserveCentavos: 0,
+            isLocked: false,
+          );
+        }
+      });
+
+      final weekly = PayoutCalculator.calculateWeekly(
+        referenceDate: DateTime(2026, 11, 18),
+        days: days,
+      );
+
+      expect(weekly.totalSalesCentavos, 500000); // 5 * 100,000
+      expect(weekly.totalCapitalSoldCentavos, 300000); // 5 * 60,000
+      expect(weekly.totalGrossProfitCentavos, 200000); // 5 * 40,000
+      expect(weekly.totalSpoilageCentavos, 25000); // 5 * 5,000
+      expect(weekly.totalOtherExpensesCentavos, 25000); // 5 * 5,000
+      expect(weekly.totalNetProfitCentavos, 150000); // 5 * 30,000
+      expect(weekly.totalToParentsCentavos, 325000); // 5 * 65,000
+      expect(weekly.totalSalaryCentavos, 45000); // 5 * 9,000
+      expect(weekly.totalReserveCentavos, 105000); // 5 * 21,000
+      expect(weekly.lockedDaysCount, 3);
+      expect(weekly.hasShortfall, isFalse);
+    });
   });
 }

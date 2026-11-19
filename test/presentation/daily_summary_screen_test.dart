@@ -242,5 +242,46 @@ void main() {
         await cleanUpWidget(tester);
       },
     );
+
+    testWidgets(
+      'switches to Weekly View and displays weekly totals for parents and salary',
+      (tester) async {
+        final now = DateTime.now();
+
+        // Add a sale for today
+        await saleRepo.completeSale(
+          lines: [
+            SaleLineInput(
+              productId: 1,
+              productName: 'Cardava',
+              weight: Weight.fromGrams(1000),
+              pricePerKgCentavos: 5000,
+              capitalPerKgCentavos: 3000,
+            ),
+          ],
+          chargedCentavos: 5000, // P50.00
+          paidCentavos: 5000,
+          createdAt: now,
+        );
+
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pumpAndSettle();
+
+        // Find Weekly Payout segmented button and tap it
+        final weeklySegment = find.text('Weekly Payout');
+        expect(weeklySegment, findsOneWidget);
+        await tester.tap(weeklySegment);
+        await tester.pumpAndSettle();
+
+        // Verify Weekly Summary title and highlight KPI cards appear
+        expect(find.text('Weekly Summary'), findsOneWidget);
+        expect(find.text('TOTAL TO PARENTS'), findsOneWidget);
+        expect(find.text('MY TOTAL SALARY'), findsOneWidget);
+        expect(find.text('WEEKLY FINANCIAL CONSOLIDATION'), findsOneWidget);
+        expect(find.text('DAY-BY-DAY BREAKDOWN (MON–SUN)'), findsOneWidget);
+
+        await cleanUpWidget(tester);
+      },
+    );
   });
 }

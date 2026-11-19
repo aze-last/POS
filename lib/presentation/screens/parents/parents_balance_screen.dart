@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../domain/utils/formatters.dart';
+import '../../providers/payout_providers.dart';
 import '../../providers/restock_providers.dart';
 import '../../theme/app_theme.dart';
+import '../summary/daily_summary_screen.dart';
 
 /// Screen managing produce restock funding and running repayment balance to parents.
 class ParentsBalanceScreen extends ConsumerWidget {
@@ -130,6 +132,9 @@ class ParentsBalanceScreen extends ConsumerWidget {
               },
             ),
           ),
+
+          // This Week's Overview Card (To Parents & Salary)
+          const SliverToBoxAdapter(child: _WeeklyOverviewCard()),
 
           // Section Header
           const SliverToBoxAdapter(
@@ -401,6 +406,163 @@ class ParentsBalanceScreen extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _WeeklyOverviewCard extends ConsumerWidget {
+  const _WeeklyOverviewCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final now = DateTime.now();
+    final weeklyAsync = ref.watch(weeklySummaryStateProvider(now));
+
+    return weeklyAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (e, _) => const SizedBox.shrink(),
+      data: (weekly) {
+        final calc = weekly.calculation;
+        final startFmt = DateFormat.MMMd().format(weekly.startOfWeek);
+        final endFmt = DateFormat.MMMd().format(weekly.endOfWeek);
+
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.grey.shade300),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.calendar_view_week,
+                        size: 18,
+                        color: AppTheme.primaryDark,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'THIS WEEK ($startFmt – $endFmt)',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.textSecondary,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    '${calc.lockedDaysCount}/7 days locked',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'AMOUNT TO PARENTS',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          formatMoney(calc.totalToParentsCentavos),
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            color: AppTheme.primaryDark,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'YOUR SALARY THIS WEEK',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          formatMoney(calc.totalSalaryCentavos),
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            color: AppTheme.accentGreen,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () {
+                  ref
+                      .read(summaryViewModeProvider.notifier)
+                      .setMode(SummaryViewMode.weekly);
+                  ref.read(selectedWeeklyDateProvider.notifier).setThisWeek();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const DailySummaryScreen(),
+                    ),
+                  );
+                },
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Text(
+                        'View Full Weekly Breakdown',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.primaryDark,
+                        ),
+                      ),
+                      SizedBox(width: 4),
+                      Icon(
+                        Icons.arrow_forward,
+                        size: 14,
+                        color: AppTheme.primaryDark,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

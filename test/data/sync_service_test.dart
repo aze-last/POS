@@ -194,33 +194,40 @@ void main() {
       },
     );
 
-    test('backfillMissingSyncIds marks products with local images for cloud push', () async {
-      // Create a temporary file to simulate a local product photo
-      final tempDir = Directory.systemTemp.createTempSync('pos_test_img');
-      final tempFile = File('${tempDir.path}/test_banana.jpg');
-      await tempFile.writeAsBytes([1, 2, 3, 4, 5]);
+    test(
+      'backfillMissingSyncIds marks products with local images for cloud push',
+      () async {
+        // Create a temporary file to simulate a local product photo
+        final tempDir = Directory.systemTemp.createTempSync('pos_test_img');
+        final tempFile = File('${tempDir.path}/test_banana.jpg');
+        await tempFile.writeAsBytes([1, 2, 3, 4, 5]);
 
-      final initialTime = DateTime(2026, 1, 1);
-      final prod = await db.into(db.products).insertReturning(
-        ProductsCompanion.insert(
-          name: 'Cardava Image',
-          defaultPriceCentavos: 3000,
-          capitalCentavos: 2000,
-          imagePath: Value(tempFile.path),
-          syncId: const Value('sync-img-001'),
-          updatedAt: Value(initialTime),
-        ),
-      );
+        final initialTime = DateTime(2026, 1, 1);
+        final prod = await db
+            .into(db.products)
+            .insertReturning(
+              ProductsCompanion.insert(
+                name: 'Cardava Image',
+                defaultPriceCentavos: 3000,
+                capitalCentavos: 2000,
+                imagePath: Value(tempFile.path),
+                syncId: const Value('sync-img-001'),
+                updatedAt: Value(initialTime),
+              ),
+            );
 
-      expect(prod.updatedAt, equals(initialTime));
+        expect(prod.updatedAt, equals(initialTime));
 
-      await syncService.backfillMissingSyncIds();
+        await syncService.backfillMissingSyncIds();
 
-      final updated = await (db.select(db.products)..where((p) => p.id.equals(prod.id))).getSingle();
-      expect(updated.updatedAt!.isAfter(initialTime), isTrue);
+        final updated = await (db.select(
+          db.products,
+        )..where((p) => p.id.equals(prod.id))).getSingle();
+        expect(updated.updatedAt!.isAfter(initialTime), isTrue);
 
-      // Clean up
-      tempDir.deleteSync(recursive: true);
-    });
+        // Clean up
+        tempDir.deleteSync(recursive: true);
+      },
+    );
   });
 }

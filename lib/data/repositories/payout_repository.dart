@@ -55,6 +55,30 @@ class PayoutRepository {
         .watchSingleOrNull();
   }
 
+  /// Streams payout records for an arbitrary date range.
+  Stream<List<Payout>> watchPayoutsForRange(DateTime start, DateTime end) {
+    final s = _startOfDay(start);
+    final e = _endOfDay(end);
+
+    return (_db.select(_db.payouts)..where(
+          (p) =>
+              p.date.isBiggerOrEqualValue(s) & p.date.isSmallerOrEqualValue(e),
+        ))
+        .watch();
+  }
+
+  /// Retrieves payout records for an arbitrary date range.
+  Future<List<Payout>> getPayoutsForRange(DateTime start, DateTime end) {
+    final s = _startOfDay(start);
+    final e = _endOfDay(end);
+
+    return (_db.select(_db.payouts)..where(
+          (p) =>
+              p.date.isBiggerOrEqualValue(s) & p.date.isSmallerOrEqualValue(e),
+        ))
+        .get();
+  }
+
   /// Saves the settlement amounts for the day and marks the day as locked.
   Future<void> saveAndLockPayout({
     required DateTime date,

@@ -1,3 +1,7 @@
+## [v1.0.6] - 2026-11-19
+
+Release v1.0.6: Add 7-day Weekly Summary and Parents' Balance weekly overview with amount to parents and salary computation
+
 ## [v1.0.5] - 2026-11-17
 
 Enable multi-device product photo syncing across paired phones with local offline caching

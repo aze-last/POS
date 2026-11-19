@@ -539,16 +539,27 @@ class SaleRepository {
     );
   }
 
-  /// Retrieves sales with details, optionally filtered by a specific calendar day.
+  /// Retrieves sales with details, optionally filtered by a specific calendar day or date range.
   /// Performs a single batched query for line items to eliminate N+1 overhead.
   Future<List<SaleWithDetails>> getSalesWithDetails({
     DateTime? dateFilter,
+    DateTime? startDate,
+    DateTime? endDate,
   }) async {
     var query = _db.select(_db.sales);
 
     if (dateFilter != null) {
       final start = _startOfDay(dateFilter);
       final end = _endOfDay(dateFilter);
+      query = query
+        ..where(
+          (s) =>
+              s.createdAt.isBiggerOrEqualValue(start) &
+              s.createdAt.isSmallerOrEqualValue(end),
+        );
+    } else if (startDate != null && endDate != null) {
+      final start = _startOfDay(startDate);
+      final end = _endOfDay(endDate);
       query = query
         ..where(
           (s) =>
@@ -581,12 +592,25 @@ class SaleRepository {
   }
 
   /// Streams sales with details for real-time reactivity without N+1 queries.
-  Stream<List<SaleWithDetails>> watchSalesWithDetails({DateTime? dateFilter}) {
+  Stream<List<SaleWithDetails>> watchSalesWithDetails({
+    DateTime? dateFilter,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) {
     var query = _db.select(_db.sales);
 
     if (dateFilter != null) {
       final start = _startOfDay(dateFilter);
       final end = _endOfDay(dateFilter);
+      query = query
+        ..where(
+          (s) =>
+              s.createdAt.isBiggerOrEqualValue(start) &
+              s.createdAt.isSmallerOrEqualValue(end),
+        );
+    } else if (startDate != null && endDate != null) {
+      final start = _startOfDay(startDate);
+      final end = _endOfDay(endDate);
       query = query
         ..where(
           (s) =>

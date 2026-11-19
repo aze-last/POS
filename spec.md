@@ -107,12 +107,24 @@ settings(salary_mode, salary_percent_basis_points, fixed_daily_salary_centavos)
     - Zero Salary Alert: If expenses and losses exceed gross profit (remaining salary is ₱0), display a prominent red alert that no salary is left for the day.
   - **Live Impact Preview on Add Expense**: The Add Expense dialog calculates and previews the impact of the expense on remaining salary in real time, warning the user if the expense will reduce or exhaust their remaining salary for that day.
 
-### 5.5 Daily Summary (selected day)
-- Total charged, total capital cost, gross profit, number of sales, total discounts, total kg per product.
-- Payout section (see section 6).
+### 5.5 Daily & Weekly Summary
+- **Daily View (selected day)**:
+  - Total charged, total capital cost, gross profit, number of sales, total discounts, total kg per product.
+  - Payout section (see section 6).
+- **Weekly View (selected 7-day Monday–Sunday week)**:
+  - Toggle between Daily and Weekly views seamlessly.
+  - Week navigation: Previous week, Current week, Next week, with calendar week picker.
+  - Weekly KPI summary:
+    - Total Amount to Parents for the week: sum of all 7 days' to_parents amounts (using locked amounts for locked days, live suggested amounts for unlocked days).
+    - Total Salary for the week: sum of all 7 days' salary amounts (using locked amounts for locked days, live suggested amounts for unlocked days).
+    - Total Sales Charged, Total Produce Capital Sold, Total Spoilage & Expenses, Net Profit, and Reserve.
+  - Day-by-Day 7-Day Breakdown Table (Monday through Sunday):
+    - Displays each day's date, day name, charged sales, amount to parents, salary, and locked/pending status badge.
+    - Tapping any day row navigates directly to that day's Daily Summary for inspection or payout locking.
 
 ### 5.6 Parents' Balance
 - Running view: total restock spend (restock_purchases), total returned to parents (locked payouts), outstanding balance = restock spend - returned.
+- Weekly overview card: shows this week's repayment to parents and salary earned with a quick shortcut to Weekly Summary.
 - Manual entry for restock purchases.
 
 ### 5.7 Settings
@@ -141,6 +153,23 @@ settings(salary_mode, salary_percent_basis_points, fixed_daily_salary_centavos)
 - Editable override fields for to_parents and salary. Show difference from the suggestion.
 - "Mark as paid out" saves ACTUAL amounts to `payouts` and locks the day. "Reopen" unlocks it.
 - The default 30% is a placeholder, not advice. The user tunes it after real data.
+
+### 6.1 Weekly Payout Aggregation Logic
+- Standard week runs Monday 00:00:00 to Sunday 23:59:59 (7 days).
+- For each day $d \in \{1 \dots 7\}$:
+  - If day payout is locked: `to_parents` = locked `to_parents_centavos`, `salary` = locked `salary_centavos`, `reserve` = locked `reserve_centavos`.
+  - If day payout is unlocked: compute live via `PayoutCalculator.calculate` from that day's sales, spoilage, and other expenses.
+- Aggregated weekly totals:
+  - $\text{weekly\_to\_parents} = \sum_{d=1}^7 \text{to\_parents}_d$
+  - $\text{weekly\_salary} = \sum_{d=1}^7 \text{salary}_d$
+  - $\text{weekly\_sales} = \sum_{d=1}^7 \text{sales}_d$
+  - $\text{weekly\_capital\_sold} = \sum_{d=1}^7 \text{capital\_sold}_d$
+  - $\text{weekly\_spoilage} = \sum_{d=1}^7 \text{spoilage}_d$
+  - $\text{weekly\_other\_expenses} = \sum_{d=1}^7 \text{other\_expenses}_d$
+  - $\text{weekly\_gross\_profit} = \text{weekly\_sales} - \text{weekly\_capital\_sold}$
+  - $\text{weekly\_net\_profit} = \text{weekly\_gross\_profit} - \text{weekly\_spoilage} - \text{weekly\_other\_expenses}$
+  - $\text{weekly\_reserve} = \sum_{d=1}^7 \text{reserve}_d$
+- All math in integer centavos. No floating point. Zero Flutter imports in domain logic. Fully unit tested.
 
 ## 7. Backup & In-App Updates
 

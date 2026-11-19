@@ -127,4 +127,132 @@ class PayoutCalculator {
       isSalaryCapped: isSalaryCapped,
     );
   }
+
+  /// Calculates the Monday (start of week at 00:00:00) for a given date.
+  static DateTime getMondayOfWeek(DateTime date) {
+    final d = DateTime(date.year, date.month, date.day);
+    return d.subtract(Duration(days: d.weekday - 1));
+  }
+
+  /// Calculates the Sunday (end of week at 23:59:59.999) for a given date.
+  static DateTime getSundayOfWeek(DateTime date) {
+    final monday = getMondayOfWeek(date);
+    return DateTime(monday.year, monday.month, monday.day + 6, 23, 59, 59, 999);
+  }
+
+  /// Aggregates 7 daily summaries into a complete weekly payout calculation.
+  ///
+  /// All values are integer centavos only.
+  static WeeklyPayoutCalculation calculateWeekly({
+    required DateTime referenceDate,
+    required List<WeeklyDaySummary> days,
+  }) {
+    final startOfWeek = getMondayOfWeek(referenceDate);
+    final endOfWeek = getSundayOfWeek(referenceDate);
+
+    int totalSales = 0;
+    int totalCapitalSold = 0;
+    int totalGrossProfit = 0;
+    int totalSpoilage = 0;
+    int totalOtherExpenses = 0;
+    int totalNetProfit = 0;
+    int totalToParents = 0;
+    int totalSalary = 0;
+    int totalReserve = 0;
+    int lockedDaysCount = 0;
+
+    for (final day in days) {
+      totalSales += day.salesCentavos;
+      totalCapitalSold += day.capitalSoldCentavos;
+      totalGrossProfit += day.grossProfitCentavos;
+      totalSpoilage += day.spoilageCentavos;
+      totalOtherExpenses += day.otherExpensesCentavos;
+      totalNetProfit += day.netProfitCentavos;
+      totalToParents += day.toParentsCentavos;
+      totalSalary += day.salaryCentavos;
+      totalReserve += day.reserveCentavos;
+      if (day.isLocked) lockedDaysCount++;
+    }
+
+    return WeeklyPayoutCalculation(
+      startOfWeek: startOfWeek,
+      endOfWeek: endOfWeek,
+      days: days,
+      totalSalesCentavos: totalSales,
+      totalCapitalSoldCentavos: totalCapitalSold,
+      totalGrossProfitCentavos: totalGrossProfit,
+      totalSpoilageCentavos: totalSpoilage,
+      totalOtherExpensesCentavos: totalOtherExpenses,
+      totalNetProfitCentavos: totalNetProfit,
+      totalToParentsCentavos: totalToParents,
+      totalSalaryCentavos: totalSalary,
+      totalReserveCentavos: totalReserve,
+      lockedDaysCount: lockedDaysCount,
+    );
+  }
+}
+
+/// Daily summary item inside a weekly payout calculation.
+class WeeklyDaySummary {
+  final DateTime date;
+  final int salesCentavos;
+  final int capitalSoldCentavos;
+  final int grossProfitCentavos;
+  final int spoilageCentavos;
+  final int otherExpensesCentavos;
+  final int netProfitCentavos;
+  final int toParentsCentavos;
+  final int salaryCentavos;
+  final int reserveCentavos;
+  final bool isLocked;
+
+  const WeeklyDaySummary({
+    required this.date,
+    required this.salesCentavos,
+    required this.capitalSoldCentavos,
+    required this.grossProfitCentavos,
+    required this.spoilageCentavos,
+    required this.otherExpensesCentavos,
+    required this.netProfitCentavos,
+    required this.toParentsCentavos,
+    required this.salaryCentavos,
+    required this.reserveCentavos,
+    required this.isLocked,
+  });
+}
+
+/// Aggregated financial metrics for an entire 7-day Monday–Sunday week.
+class WeeklyPayoutCalculation {
+  final DateTime startOfWeek;
+  final DateTime endOfWeek;
+  final List<WeeklyDaySummary> days;
+  final int totalSalesCentavos;
+  final int totalCapitalSoldCentavos;
+  final int totalGrossProfitCentavos;
+  final int totalSpoilageCentavos;
+  final int totalOtherExpensesCentavos;
+  final int totalNetProfitCentavos;
+  final int totalToParentsCentavos;
+  final int totalSalaryCentavos;
+  final int totalReserveCentavos;
+  final int lockedDaysCount;
+
+  const WeeklyPayoutCalculation({
+    required this.startOfWeek,
+    required this.endOfWeek,
+    required this.days,
+    required this.totalSalesCentavos,
+    required this.totalCapitalSoldCentavos,
+    required this.totalGrossProfitCentavos,
+    required this.totalSpoilageCentavos,
+    required this.totalOtherExpensesCentavos,
+    required this.totalNetProfitCentavos,
+    required this.totalToParentsCentavos,
+    required this.totalSalaryCentavos,
+    required this.totalReserveCentavos,
+    required this.lockedDaysCount,
+  });
+
+  /// True if weekly net reserve is negative (Loss / Shortfall across the week).
+  bool get hasShortfall => totalReserveCentavos < 0;
 }

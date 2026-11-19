@@ -112,5 +112,29 @@ void main() {
 
       await cleanUpWidget(tester);
     });
+
+    testWidgets(
+      'displays weekly overview card with amount to parents and salary and navigates to weekly summary',
+      (tester) async {
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pumpAndSettle();
+
+        // Verify weekly overview card is rendered
+        expect(find.text('AMOUNT TO PARENTS'), findsOneWidget);
+        expect(find.text('YOUR SALARY THIS WEEK'), findsOneWidget);
+        expect(find.text('View Full Weekly Breakdown'), findsOneWidget);
+
+        // Tap "View Full Weekly Breakdown"
+        await tester.tap(find.text('View Full Weekly Breakdown'));
+        await tester.pumpAndSettle();
+
+        // Should now be on Weekly Summary screen
+        expect(find.text('Weekly Summary'), findsOneWidget);
+        expect(find.text('TOTAL TO PARENTS'), findsOneWidget);
+        expect(find.text('MY TOTAL SALARY'), findsOneWidget);
+
+        await cleanUpWidget(tester);
+      },
+    );
   });
 }
